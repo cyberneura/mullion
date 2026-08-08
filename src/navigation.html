@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'" />
+    <link rel="stylesheet" href="styles/navigation.css" />
+    <title>Ostinato navigation</title>
+  </head>
+  <body>
+    <div id="tab-bar" class="tab-bar" hidden>
+      <div id="tabs" class="tabs"></div>
+      <button id="new-tab" class="icon-button" type="button" title="New tab (Cmd/Ctrl+T)">+</button>
+    </div>
+    <div id="toolbar" class="toolbar" hidden>
+      <button id="back" class="icon-button" type="button" title="Back (Cmd/Ctrl+[)">&#8249;</button>
+      <button id="forward" class="icon-button" type="button" title="Forward (Cmd/Ctrl+])">&#8250;</button>
+      <button id="reload" class="icon-button" type="button" title="Reload (Cmd/Ctrl+R)">&#8635;</button>
+      <input id="url" class="url" type="text" spellcheck="false" autocomplete="off" placeholder="Enter a URL" />
+      <button id="external" class="icon-button" type="button" title="Open in the default browser">&#8599;</button>
+      <button id="collapse" class="icon-button" type="button" title="Hide the navigation bar (Esc)">&#9650;</button>
+    </div>
+    <script src="navigation.js"></script>
+  </body>
+</html>

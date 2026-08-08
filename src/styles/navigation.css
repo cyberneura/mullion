@@ -1,0 +1,143 @@
+:root {
+  --bg: #1b1c1f;
+  --bg-raised: #26282d;
+  --fg: #d8dade;
+  --fg-dim: #8b9099;
+  --accent: #4c8dff;
+  --border: #33363c;
+  --tab-bar-height: 32px;
+  --toolbar-height: 40px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", "Noto Sans JP", sans-serif;
+  user-select: none;
+}
+
+.tab-bar {
+  display: flex;
+  align-items: stretch;
+  height: var(--tab-bar-height);
+  border-bottom: 1px solid var(--border);
+  /* The empty area right of the tabs is the window drag handle, so the bar
+     stays usable as a title bar when the frame is hidden. */
+  -webkit-app-region: drag;
+}
+
+.tab-bar[hidden] {
+  display: none;
+}
+
+.tabs {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-app-region: no-drag;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 200px;
+  padding: 0 6px 0 10px;
+  border-right: 1px solid var(--border);
+  color: var(--fg-dim);
+  background: transparent;
+  cursor: default;
+}
+
+.tab.active {
+  color: var(--fg);
+  background: var(--bg-raised);
+}
+
+.tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-close {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  color: inherit;
+  background: transparent;
+  font-size: 14px;
+  line-height: 1;
+  cursor: default;
+}
+
+.tab-close:hover {
+  background: #4a4d54;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--toolbar-height);
+  padding: 0 6px;
+  -webkit-app-region: drag;
+}
+
+.toolbar[hidden] {
+  display: none;
+}
+
+.icon-button {
+  flex: none;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: var(--fg);
+  background: transparent;
+  font-size: 15px;
+  line-height: 1;
+  cursor: default;
+  -webkit-app-region: no-drag;
+}
+
+.icon-button:hover:not(:disabled) {
+  background: var(--bg-raised);
+}
+
+.icon-button:disabled {
+  color: #565a61;
+}
+
+.url {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--fg);
+  background: var(--bg-raised);
+  font: inherit;
+  user-select: text;
+  -webkit-app-region: no-drag;
+}
+
+.url:focus {
+  border-color: var(--accent);
+  outline: none;
+}
