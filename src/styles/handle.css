@@ -1,0 +1,38 @@
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  /* Transparent so only the grip and the button paint over the page. */
+  background: transparent;
+  user-select: none;
+}
+
+body {
+  display: flex;
+  align-items: stretch;
+}
+
+.grip {
+  flex: 1;
+  -webkit-app-region: drag;
+}
+
+.reveal {
+  flex: none;
+  width: 26px;
+  border: 0;
+  border-bottom-left-radius: 6px;
+  color: #d8dade;
+  /* Semi-transparent so the button stays legible over both light and dark
+     pages without blocking much of the content underneath. */
+  background: rgba(27, 28, 31, 0.55);
+  font-size: 10px;
+  line-height: 1;
+  cursor: default;
+  -webkit-app-region: no-drag;
+}
+
+.reveal:hover {
+  background: rgba(27, 28, 31, 0.9);
+}
