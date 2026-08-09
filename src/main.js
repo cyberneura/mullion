@@ -843,6 +843,11 @@ function normalizeInput(input) {
 // accelerator: handling a key in both places would run the command twice.
 function handleShortcut(event, input) {
   if (input.type !== 'keyDown' || input.key !== 'Escape' || !navigationVisible) return;
+  // While a page is full screen the bar is off screen even though it is still
+  // "visible", and Escape belongs to the page: it is how full screen ends.
+  // Swallowing it here costs the user a second press for no visible effect.
+  const active = activeTab();
+  if (active && active.htmlFullScreen) return;
   setNavigationVisible(false);
   event.preventDefault();
 }
