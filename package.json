@@ -1,17 +1,18 @@
 {
-  "name": "ostinato",
+  "name": "mullion",
   "version": "0.1.0",
   "description": "A frameless browser window for leaving a page playing.",
   "main": "src/main.js",
   "type": "commonjs",
   "packageManager": "pnpm@10.26.0",
   "bin": {
-    "ostinato": "bin/ostinato.js"
+    "mullion": "bin/mullion.js"
   },
   "scripts": {
     "start": "electron .",
+    "postinstall": "node scripts/brand-dev-bundle.js",
     "devtools": "electron . --open-devtools",
-    "check": "node --check src/main.js && node --check src/cli.js && node --check src/targets.js && node --check src/scripts.js && node --check src/settings.js && node --check src/navigation.js && node --check src/navigation-preload.js && node --check src/content-preload.js && node --check src/handle.js && node --check bin/ostinato.js",
+    "check": "node --check scripts/brand-dev-bundle.js && node --check src/main.js && node --check src/cli.js && node --check src/targets.js && node --check src/scripts.js && node --check src/settings.js && node --check src/images.js && node --check src/qrcode.js && node --check src/navigation.js && node --check src/navigation-preload.js && node --check src/titlebar.js && node --check src/qr.js && node --check src/qr-preload.js && node --check bin/mullion.js",
     "test": "node --test",
     "pack": "electron-builder --dir",
     "dist": "electron-builder"
@@ -27,15 +28,15 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cyberneura/ostinato.git"
+    "url": "git+https://github.com/cyberneura/mullion.git"
   },
   "devDependencies": {
     "electron": "^42.5.0",
     "electron-builder": "^26.0.12"
   },
   "build": {
-    "appId": "com.cyberneura.ostinato",
-    "productName": "Ostinato",
+    "appId": "com.cyberneura.mullion",
+    "productName": "Mullion",
     "files": [
       "src/**/*",
       "bin/**/*",

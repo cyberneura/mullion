@@ -104,7 +104,7 @@ function classifyTarget(raw, { cwd = process.cwd(), exists = fs.existsSync } = {
 
   // Ambiguous bare word: `report.json` could be a file or a domain. A file that
   // is actually there wins; otherwise fall back to the host-shaped guess so
-  // `ostinato example.com` works without a scheme.
+  // `mullion example.com` works without a scheme.
   const absolute = path.resolve(cwd, expanded);
   if (exists(absolute)) {
     return asFile(expanded, cwd);
@@ -128,7 +128,7 @@ function asFile(target, cwd) {
 // Human-readable label for a target, used for the window/tab title before the
 // page reports one of its own.
 function labelFor(target) {
-  if (!target) return 'Ostinato';
+  if (!target) return 'Mullion';
   if (target.kind === 'file') return path.basename(target.filePath);
   if (target.kind === 'stdin') return 'stdin';
   if (target.kind === 'url' || target.kind === 'external') {
@@ -138,7 +138,7 @@ function labelFor(target) {
       return target.url;
     }
   }
-  return 'Ostinato';
+  return 'Mullion';
 }
 
 module.exports = { classifyTarget, labelFor, fileKindFor, FILE_KINDS, HOSTLIKE_PATTERN, SCHEME_PATTERN };

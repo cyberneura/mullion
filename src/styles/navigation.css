@@ -70,6 +70,9 @@ body {
 }
 
 .tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex: none;
   width: 16px;
   height: 16px;
@@ -78,8 +81,6 @@ body {
   border-radius: 3px;
   color: inherit;
   background: transparent;
-  font-size: 14px;
-  line-height: 1;
   cursor: default;
 }
 
@@ -101,6 +102,9 @@ body {
 }
 
 .icon-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex: none;
   width: 26px;
   height: 24px;
@@ -109,10 +113,20 @@ body {
   border-radius: 4px;
   color: var(--fg);
   background: transparent;
-  font-size: 15px;
-  line-height: 1;
   cursor: default;
   -webkit-app-region: no-drag;
+}
+
+/* Bootstrap Icons are drawn on a 16px grid and take their colour from the
+   button, so a disabled or hovered button needs no icon rule of its own. */
+.icon {
+  width: 14px;
+  height: 14px;
+}
+
+.icon-small {
+  width: 10px;
+  height: 10px;
 }
 
 .icon-button:hover:not(:disabled) {

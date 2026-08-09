@@ -1,0 +1,92 @@
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #1b1c1f;
+  color: #d8dade;
+  font: 12px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  user-select: none;
+}
+
+body {
+  display: flex;
+  align-items: stretch;
+}
+
+/* Left free for the window buttons the platform draws over this band. Its
+   width comes from the main process, which is what decides the framing. */
+.inset {
+  flex: none;
+  -webkit-app-region: drag;
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 70%;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: default;
+  -webkit-app-region: no-drag;
+}
+
+.title:hover {
+  background: #303237;
+}
+
+.label {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Fixed size whether it holds an icon, a spinner, or nothing, so the title
+   keeps its place while a page loads. */
+.mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.favicon {
+  width: 14px;
+  height: 14px;
+}
+
+.mark.loading .favicon {
+  display: none;
+}
+
+.mark.loading::after {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border: 2px solid #43464d;
+  border-top-color: #9aa0a6;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.grip {
+  flex: 1;
+  -webkit-app-region: drag;
+}

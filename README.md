@@ -1,13 +1,14 @@
-# Ostinato
+# Mullion
 
 A frameless browser window for leaving a page playing.
 
-Ostinato opens a URL or a local file in a window with no visible browser UI —
+Mullion opens a URL or a local file in a window with no visible browser UI —
 just the page. The navigation bar appears when you ask for it and gets out of
 the way again. It can run a script after the page loads, and it can live in the
 menu bar instead of the dock.
 
-The name is the musical term for a figure that repeats over and over.
+The name is the architectural term for the slender bar that divides a window
+into panes — the only part of a window you are meant not to notice.
 
 ## Install
 
@@ -16,17 +17,17 @@ pnpm install
 pnpm start -- https://example.com
 ```
 
-To get an `ostinato` command:
+To get a `mullion` command:
 
 ```shell
 pnpm link --global
-ostinato https://example.com
+mullion https://example.com
 ```
 
 ## Usage
 
 ```
-ostinato [options] [target ...]
+mullion [options] [target ...]
 ```
 
 A target is a URL (`https://example.com`, or just `example.com`), a local file
@@ -46,20 +47,62 @@ tabs.
 | `--new-window` | open a new window even if an instance is already running |
 | `--menubar` | run as a menu bar / tray application |
 | `--restore` | reopen the pages from the previous session |
+| `--show-url` | show the URL in the title bar instead of the page title |
 | `--js <code>` / `--js-file <path>` | run JavaScript after the page loads |
 | `--playwright <code>` / `--playwright-file <path>` | run Playwright-compatible code after the page loads |
 | `--js-every-load` | re-run the scripts after every navigation |
 | `--open-devtools` | open developer tools on start |
 
-### Showing the navigation bar
+### The title bar
 
-Nothing is visible by default except a small handle in the top-right corner: a
-drag strip and a `▼` button.
+The only chrome shown by default is a 30px title bar holding the window buttons,
+the page's favicon, and its title:
+
+```
+◯◯◯  ▣ Page title
+```
+
+It is a reserved row, not an overlay, so nothing sits on top of the page. Drag
+it to move the window, and click the title to open and close the navigation bar.
+
+While a page is loading the favicon is replaced by a spinner, in the same 14px
+box so the title does not move. The icon is fetched by the main process in the
+page's own session and handed to the title bar as a decoded PNG, so the title
+bar never makes a request of its own — pointing it at a page-supplied URL would
+take the request out of the content partition.
+
+Only `http(s)` icons are fetched. `session.fetch` follows `file:` and custom
+protocols, and a remote page must not be able to name a local file for the main
+process to read. `data:` icons are dropped too, since `fetch` does not support
+that scheme at all.
+
+Of what is fetched, only PNG is shown. The icon has to be measured before it is
+decoded — 256KB of image data can declare a canvas of several gigabytes — and
+PNG states its size once, in one place. JPEG offers several ways to say it and
+several ways to disguise it, so it is refused rather than measured. A site
+serving a JPEG or `.ico` favicon simply shows none.
+
+**View → Show URL in Title Bar** swaps the title for the address, and
+`--show-url` starts that way. The choice is remembered between runs. `--title`
+overrides both: a pinned title stays pinned.
+
+The two kinds of full screen are treated differently. **View → Toggle Full
+Screen** (`Ctrl+Cmd+F`, `F11` elsewhere), which is how you get there on a
+frameless window, hides the title bar and lets the tab strip fall away — but
+`Cmd/Ctrl+L` and the top edge still call the navigation bar back, the way a
+browser's toolbar behaves. When a *page* goes full screen, a video for
+instance, every band is hidden and stays hidden: the page asked for the screen.
+
+With `--frame` the platform draws its own title bar and Mullion does not add a
+second one.
+
+### Showing the navigation bar
 
 | Action | Result |
 |---|---|
-| Click `▼` | show the bar and keep it |
-| Rest the pointer on the top 4px for 300ms | show the bar until the pointer leaves |
+| Click the window title | show the bar and keep it |
+| Rest the pointer on the top 4px of the page for 300ms | show the bar for two seconds |
+| Click anywhere in the page | hide the bar |
 | `Cmd/Ctrl+L` | show the bar and focus the address field |
 | `Cmd/Ctrl+T` | new tab, with the address field focused |
 | `Esc` | hide the bar |
@@ -68,6 +111,30 @@ drag strip and a `▼` button.
 `Cmd/Ctrl+R` reloads, `Cmd/Ctrl+W` closes a tab, `Cmd/Ctrl+[` and `Cmd/Ctrl+]`
 go back and forward. Everything except `Esc` is also in the application menu.
 
+Both pointer gestures stop at a frame boundary: an embedded player served from
+another origin swallows the click and the hover, because neither Electron nor a
+preload sees input inside an out-of-process iframe. `Cmd/Ctrl+L` always works,
+which matters most in full screen where the title bar is not there to click.
+
+### The page menu
+
+Right-clicking the page opens:
+
+| Item | Result |
+|---|---|
+| **Back** / **Forward** / **Reload** | as the keyboard shortcuts |
+| **Show Navigation Bar** | show the bar and focus the address field |
+| **Take Screenshot** | save a PNG of the page to your Downloads folder and reveal it |
+| **Open in Default Browser** | hand the current `http(s):` or `file:` URL to the OS |
+| **Show QR Code** | show the current URL as a QR code, for opening it on a phone |
+| **Restart** | go back to the command line targets and re-run the scripts |
+
+**Take Screenshot**, **Open in Default Browser** and **Show QR Code** are also in
+the View menu. The QR code is generated in-process (`src/qrcode.js`); no URL is
+sent anywhere. The encoder tops out at 213 bytes, which a URL carrying tracking
+parameters passes easily — past that the page menu greys the item out, and the
+View menu (built once, so it cannot grey itself out per tab) says so instead.
+
 Text in the address field that does not look like a URL is sent to Google;
 the search engine is not configurable yet.
 
@@ -75,10 +142,10 @@ the search engine is not configurable yet.
 
 ```shell
 # raw JavaScript
-ostinato https://example.com --js 'document.querySelector("video").play()'
+mullion https://example.com --js 'document.querySelector("video").play()'
 
 # Playwright-compatible
-ostinato https://example.com --playwright-file ./start-playing.js
+mullion https://example.com --playwright-file ./start-playing.js
 ```
 
 Both options can be given together and any number of times; the scripts run in
@@ -91,7 +158,7 @@ otherwise your automation would follow you onto every site you visit. Pass
 
 #### What "Playwright-compatible" means here
 
-Real Playwright drives a browser from the outside. Ostinato is already inside
+Real Playwright drives a browser from the outside. Mullion is already inside
 the page, so the API is re-implemented against the DOM. The scripted-interaction
 subset works unchanged, including auto-waiting:
 
@@ -118,7 +185,7 @@ are about to execute.
 ### Menu bar mode
 
 ```shell
-ostinato --menubar --width 420 --height 640 https://example.com
+mullion --menubar --width 420 --height 640 https://example.com
 ```
 
 The window becomes a popover anchored to the tray icon. Left-clicking the icon
@@ -126,7 +193,7 @@ shows and hides it; right-clicking opens the menu:
 
 | Item | Result |
 |---|---|
-| **Close** | quit Ostinato |
+| **Close** | quit Mullion |
 | **Reload** | reload the current URL |
 | **Restart** | go back to the pages given on the command line and re-run the scripts |
 
@@ -142,14 +209,15 @@ plain text; dedicated viewers for them are not implemented yet.
 ## Development
 
 ```shell
-pnpm test     # unit tests for the CLI parser, target classifier, and script wrapping
+pnpm test     # CLI parser, target classifier, script wrapping, QR encoder, image headers
 pnpm check    # syntax check every source file
 pnpm start    # run the app
 pnpm dist     # package with electron-builder
 ```
 
-`src/cli.js`, `src/targets.js`, and `src/scripts.js` are kept free of Electron
-imports so they can be tested with `node --test` without launching a browser.
+`src/cli.js`, `src/targets.js`, `src/scripts.js`, `src/qrcode.js`, and
+`src/images.js` are kept free of Electron imports so they can be tested with
+`node --test` without launching a browser.
 
 macOS packaging (signing and notarisation) has to be verified on a Mac; it has
 not been run.
@@ -157,18 +225,25 @@ not been run.
 ## Structure
 
 ```
-bin/ostinato.js          launcher for a global install
+bin/mullion.js           launcher for a global install
 src/main.js              window, tabs, tray, IPC
-src/cli.js               argument parser            (unit tested)
+src/cli.js               argument parser                   (unit tested)
 src/targets.js           URL / file / stdin classification (unit tested)
 src/scripts.js           --js / --playwright wrapping      (unit tested)
+src/qrcode.js            byte-mode QR encoder, level M     (unit tested)
+src/images.js            PNG header measurement            (unit tested)
 src/injected/            the Playwright-compatible surface, evaluated in the page
 src/navigation.*         the navigation bar renderer
-src/handle.*             the always-visible corner handle
-src/content-preload.js   top-edge hover detection inside the page
+src/titlebar.*           the title bar renderer
+src/qr.*                 the QR code window renderer
 src/settings.js          window bounds and preferences in userData
+scripts/                 development-only helpers (macOS bundle naming)
 ```
 
 ## License
 
-MIT
+MIT.
+
+The toolbar glyphs are [Bootstrap Icons](https://icons.getbootstrap.com/) 1.13.1
+(MIT), inlined as SVG in `src/navigation.html` rather than pulled in as a
+webfont or a dependency.

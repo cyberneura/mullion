@@ -4,21 +4,57 @@
     <meta charset="utf-8" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'" />
     <link rel="stylesheet" href="styles/navigation.css" />
-    <title>Ostinato navigation</title>
+    <title>Mullion navigation</title>
   </head>
   <body>
+    <!-- The glyphs below are Bootstrap Icons 1.13.1 (MIT), inlined rather than
+         loaded as a webfont: the app has no build step and the pages run under
+         a `default-src 'self'` policy. -->
     <div id="tab-bar" class="tab-bar" hidden>
       <div id="tabs" class="tabs"></div>
-      <button id="new-tab" class="icon-button" type="button" title="New tab (Cmd/Ctrl+T)">+</button>
+      <button id="new-tab" class="icon-button" type="button" title="New tab (Cmd/Ctrl+T)" aria-label="New tab">
+        <svg class="icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path fill-rule="evenodd" d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2" />
+        </svg>
+      </button>
     </div>
     <div id="toolbar" class="toolbar" hidden>
-      <button id="back" class="icon-button" type="button" title="Back (Cmd/Ctrl+[)">&#8249;</button>
-      <button id="forward" class="icon-button" type="button" title="Forward (Cmd/Ctrl+])">&#8250;</button>
-      <button id="reload" class="icon-button" type="button" title="Reload (Cmd/Ctrl+R)">&#8635;</button>
+      <button id="back" class="icon-button" type="button" title="Back (Cmd/Ctrl+[)" aria-label="Back">
+        <svg class="icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path fill-rule="evenodd" d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8" />
+        </svg>
+      </button>
+      <button id="forward" class="icon-button" type="button" title="Forward (Cmd/Ctrl+])" aria-label="Forward">
+        <svg class="icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path fill-rule="evenodd" d="M1 8a.5.5 0 0 1 .5-.5h11.793l-3.147-3.146a.5.5 0 0 1 .708-.708l4 4a.5.5 0 0 1 0 .708l-4 4a.5.5 0 0 1-.708-.708L13.293 8.5H1.5A.5.5 0 0 1 1 8" />
+        </svg>
+      </button>
+      <button id="reload" class="icon-button" type="button" title="Reload (Cmd/Ctrl+R)" aria-label="Reload">
+        <svg class="icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z" />
+          <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466" />
+        </svg>
+      </button>
       <input id="url" class="url" type="text" spellcheck="false" autocomplete="off" placeholder="Enter a URL" />
-      <button id="external" class="icon-button" type="button" title="Open in the default browser">&#8599;</button>
-      <button id="collapse" class="icon-button" type="button" title="Hide the navigation bar (Esc)">&#9650;</button>
+      <button id="external" class="icon-button" type="button" title="Open in the default browser" aria-label="Open in the default browser">
+        <svg class="icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path fill-rule="evenodd" d="M8.636 3.5a.5.5 0 0 0-.5-.5H1.5A1.5 1.5 0 0 0 0 4.5v10A1.5 1.5 0 0 0 1.5 16h10a1.5 1.5 0 0 0 1.5-1.5V7.864a.5.5 0 0 0-1 0V14.5a.5.5 0 0 1-.5.5h-10a.5.5 0 0 1-.5-.5v-10a.5.5 0 0 1 .5-.5h6.636a.5.5 0 0 0 .5-.5" />
+          <path fill-rule="evenodd" d="M16 .5a.5.5 0 0 0-.5-.5h-5a.5.5 0 0 0 0 1h3.793L6.146 9.146a.5.5 0 1 0 .708.708L15 1.707V5.5a.5.5 0 0 0 1 0z" />
+        </svg>
+      </button>
+      <button id="collapse" class="icon-button" type="button" title="Hide the navigation bar (Esc)" aria-label="Hide the navigation bar">
+        <svg class="icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path fill-rule="evenodd" d="M7.646 4.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1-.708.708L8 5.707l-5.646 5.647a.5.5 0 0 1-.708-.708z" />
+        </svg>
+      </button>
     </div>
+    <!-- Cloned for every tab, so the close glyph lives in markup here rather
+         than being built out of path data in the renderer. -->
+    <template id="close-icon">
+      <svg class="icon icon-small" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+        <path d="M2.146 2.854a.5.5 0 1 1 .708-.708L8 7.293l5.146-5.147a.5.5 0 0 1 .708.708L8.707 8l5.147 5.146a.5.5 0 0 1-.708.708L8 8.707l-5.146 5.147a.5.5 0 0 1-.708-.708L7.293 8z" />
+      </svg>
+    </template>
     <script src="navigation.js"></script>
   </body>
 </html>

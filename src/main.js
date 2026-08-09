@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BaseWindow, WebContentsView, Menu, Tray, ipcMain, shell, nativeImage, screen } = require('electron');
+const { app, BaseWindow, BrowserWindow, WebContentsView, Menu, Tray, dialog, ipcMain, session, shell, nativeImage, screen } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -11,6 +11,8 @@ const { parseCli, helpText } = require('./cli');
 const { classifyTarget, labelFor, HOSTLIKE_PATTERN, SCHEME_PATTERN } = require('./targets');
 const { resolveScripts, buildInjection } = require('./scripts');
 const { loadState, saveState } = require('./settings');
+const { imageTooLarge } = require('./images');
+const qrcode = require('./qrcode');
 
 // Heights of the two rows the navigation view can show. The view is sized to
 // their sum and the page hides the rows it was told not to draw, so the main
@@ -18,33 +20,66 @@ const { loadState, saveState } = require('./settings');
 const TAB_BAR_HEIGHT = 32;
 const TOOLBAR_HEIGHT = 40;
 
-// The always-visible handle in the top-right corner: a drag strip plus the
-// button that reveals the navigation bar.
-const HANDLE_WIDTH = 96;
-const HANDLE_HEIGHT = 22;
+// The always-visible band at the top: the window's drag area and its title,
+// which is also the button that reveals the navigation bar.
+const TITLE_BAR_HEIGHT = 30;
+// Room kept clear at its left for the macOS window buttons, which the system
+// draws over our content rather than in a frame of its own.
+const TRAFFIC_LIGHT_INSET = 78;
+const TRAFFIC_LIGHT_HEIGHT = 16;
+
+// The top edge of the page reveals the navigation bar once the pointer has
+// stayed there; the dwell keeps a pointer merely crossing the edge from
+// tripping it.
+const EDGE_HEIGHT = 4;
+const EDGE_DWELL_MS = 300;
 
 const MIN_CONTENT_HEIGHT = 80;
 const BLANK_URL = 'about:blank';
+const APP_NAME = 'Mullion';
+
+// Favicons are refused above this size and re-encoded as PNG before the title
+// bar sees them, so a page cannot hand the chrome renderer arbitrary bytes.
+// The edge limit is separate: 256KB of PNG can still declare a 30000x30000
+// canvas, which is several gigabytes once decoded.
+const MAX_FAVICON_BYTES = 256 * 1024;
+const MAX_FAVICON_EDGE = 4096;
+const FAVICON_SIZE = 32;
+// A server that sends headers and then stalls would otherwise leave the read
+// pending for as long as the app runs.
+const FAVICON_TIMEOUT_MS = 10000;
 
 // Remote pages get their own session so nothing they store is shared with the
-// navigation bar or the handle, which run with a preload.
-const CONTENT_PARTITION = 'persist:ostinato-content';
+// navigation bar or the title bar, which run with a preload.
+const CONTENT_PARTITION = 'persist:mullion-content';
 
 let mainWindow = null;
 let navigationView = null;
-let handleView = null;
+let titleBarView = null;
+let qrWindow = null;
 let tray = null;
 let quitting = false;
 
 const tabs = new Map();
+// Keyed by the QR window's webContents id: it asks for its own payload once,
+// on load, rather than being sent one it might miss.
+const qrPayloads = new Map();
 let nextTabId = 1;
 let activeTabId = null;
 
 let navigationVisible = false;
-// Set by the `▼` button / Cmd+L: a pinned bar stays until it is explicitly
+// The window can be full screen because the user asked the window to be, or
+// because the page called requestFullscreen(). The first belongs to the window
+// and the second to a tab, they end independently, and neither may clobber the
+// other.
+let windowFullScreen = false;
+// Whether the title bar shows the address instead of the page's own title.
+let showUrl = false;
+// Set by the window title / Cmd+L: a pinned bar stays until it is explicitly
 // dismissed, while a hover-revealed bar hides itself again.
 let navigationPinned = false;
 let hoverHideTimer = null;
+let edgeDwellTimer = null;
 
 let persisted = null;
 let injections = [];
@@ -52,6 +87,11 @@ let injections = [];
 let cliTargets = [];
 // Scratch directories holding HTML passed via --html / --html-file / stdin.
 const tempDirs = [];
+
+// Unpackaged, the app is running inside Electron's own bundle, so the macOS
+// application menu and the userData directory would both be named after it.
+// This has to happen before anything asks for a path or builds the menu.
+app.setName(APP_NAME);
 
 const cli = parseCli(process.argv.slice(app.isPackaged ? 1 : 2));
 
@@ -62,8 +102,8 @@ if (cli.help) {
   console.log(pkg.version);
   app.exit(0);
 } else if (cli.errors.length > 0) {
-  for (const error of cli.errors) console.error(`ostinato: ${error}`);
-  console.error('Run `ostinato --help` for usage.');
+  for (const error of cli.errors) console.error(`mullion: ${error}`);
+  console.error('Run `mullion --help` for usage.');
   app.exit(2);
 } else {
   start();
@@ -89,8 +129,10 @@ function start() {
 
   app.whenReady().then(() => {
     persisted = loadState();
+    // Resolved before the menu is built: its checkbox has to start out right.
+    showUrl = cli.showUrl || persisted.showUrl;
     const resolved = resolveScripts(cli.scripts);
-    for (const error of resolved.errors) console.error(`ostinato: ${error}`);
+    for (const error of resolved.errors) console.error(`mullion: ${error}`);
     injections = resolved.scripts.map((script) => ({ origin: script.origin, code: buildInjection(script) }));
 
     cliTargets = collectStartupUrls();
@@ -99,6 +141,8 @@ function start() {
       const icon = nativeImage.createFromPath(path.join(__dirname, '..', 'resources', 'icon.png'));
       if (!icon.isEmpty()) app.dock.setIcon(icon);
     }
+
+    app.setAboutPanelOptions({ applicationName: APP_NAME, applicationVersion: pkg.version });
 
     // The menu is installed even in menu bar mode: it is where the keyboard
     // accelerators live, and they have to keep working when the popover is up.
@@ -163,7 +207,7 @@ function resolveTargetUrl(target) {
     return null;
   }
   if (target.kind === 'invalid') {
-    console.error(`ostinato: ${target.reason}`);
+    console.error(`mullion: ${target.reason}`);
     return null;
   }
   return target.url;
@@ -174,19 +218,19 @@ function resolveTargetUrl(target) {
 // through a real file instead.
 function readStdin() {
   if (process.stdin.isTTY) {
-    console.error('ostinato: `-` was given but stdin is a terminal');
+    console.error('mullion: `-` was given but stdin is a terminal');
     return '';
   }
   try {
     return fs.readFileSync(0, 'utf8');
   } catch (error) {
-    console.error(`ostinato: cannot read stdin: ${error.message}`);
+    console.error(`mullion: cannot read stdin: ${error.message}`);
     return '';
   }
 }
 
 function htmlToUrl(html) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ostinato-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mullion-'));
   tempDirs.push(dir);
   const filePath = path.join(dir, 'index.html');
   fs.writeFileSync(filePath, html);
@@ -200,7 +244,7 @@ function cleanTempDirs() {
     try {
       fs.rmSync(dir, { recursive: true, force: true });
     } catch (error) {
-      console.warn(`ostinato: could not remove ${dir}: ${error.message}`);
+      console.warn(`mullion: could not remove ${dir}: ${error.message}`);
     }
   }
 }
@@ -212,7 +256,7 @@ function createWindow() {
     ...bounds,
     minWidth: 320,
     minHeight: 200,
-    title: cli.title || 'Ostinato',
+    title: cli.title || 'Mullion',
     backgroundColor: '#1b1c1f',
     show: !cli.menubar,
     skipTaskbar: cli.menubar,
@@ -225,15 +269,45 @@ function createWindow() {
 
   navigationPinned = cli.navigation || (!cli.menubar && persisted.navigationPinned);
   navigationVisible = navigationPinned;
+  // A window closed while full screen would otherwise hand the state to its
+  // replacement, which starts with no title bar and no way to get one back.
+  windowFullScreen = false;
 
   navigationView = createChromeView('navigation.html');
-  handleView = createChromeView('handle.html');
   mainWindow.contentView.addChildView(navigationView);
-  mainWindow.contentView.addChildView(handleView);
+  // With --frame the platform already draws a title bar; a second one would
+  // just repeat it.
+  if (!cli.frame) {
+    titleBarView = createChromeView('titlebar.html');
+    mainWindow.contentView.addChildView(titleBarView);
+  }
 
   openStartupTabs();
 
   mainWindow.on('resize', relayout);
+  // Full screen is the one time the title bar has nothing to offer: the window
+  // buttons are gone, there is nothing to drag, and the point of the mode is
+  // that the page gets the whole screen.
+  mainWindow.on('enter-full-screen', () => {
+    windowFullScreen = true;
+    // Asking for full screen is asking for the screen, so a bar that is already
+    // up comes down with the rest of the chrome. `navigationPinned` is left
+    // alone rather than run through setNavigationVisible(): the pin is the
+    // user's standing choice, it is written to settings.json, and full screen
+    // is not a decision to change it. Cmd+L and the top edge still work here,
+    // and leaving full screen puts back whatever was chosen.
+    navigationVisible = false;
+    clearEdgeDwell();
+    clearHoverHide();
+    relayout();
+  });
+  mainWindow.on('leave-full-screen', () => {
+    windowFullScreen = false;
+    navigationVisible = navigationPinned;
+    clearEdgeDwell();
+    clearHoverHide();
+    relayout();
+  });
   mainWindow.on('close', (event) => {
     // In menu bar mode the window is a popover: closing it should put it away,
     // not end the session. "Close" in the tray menu is what actually quits.
@@ -245,13 +319,18 @@ function createWindow() {
     persistState();
   });
   mainWindow.on('closed', () => {
-    if (hoverHideTimer !== null) {
-      clearTimeout(hoverHideTimer);
-      hoverHideTimer = null;
-    }
+    clearHoverHide();
+    clearEdgeDwell();
+    // The QR window is a window in its own right, so off macOS it keeps
+    // `window-all-closed` from firing: the app would stay running with nothing
+    // left but a code for a page that is gone.
+    if (qrWindow && !qrWindow.isDestroyed()) qrWindow.destroy();
     mainWindow = null;
     navigationView = null;
-    handleView = null;
+    titleBarView = null;
+    for (const tab of tabs.values()) {
+      if (tab.faviconRequest) tab.faviconRequest.abort();
+    }
     tabs.clear();
     activeTabId = null;
   });
@@ -261,7 +340,7 @@ function createWindow() {
   relayout();
 }
 
-// `ostinato a.example b.example` should land on the first page named, not the
+// `mullion a.example b.example` should land on the first page named, not the
 // last one to finish being created, so the selection is redone at the end.
 function openStartupTabs() {
   const created = cliTargets.map((url) => createTab(url, { runScripts: true })).filter(Boolean);
@@ -271,14 +350,24 @@ function openStartupTabs() {
 // How much window chrome to keep.
 //
 // On macOS `frame: false` removes the traffic lights along with the title bar,
-// which leaves no way to close the window; `titleBarStyle: 'hiddenInset'` gives
-// the same edge-to-edge content while keeping them. A menu bar popover is the
-// exception -- it is dismissed by clicking the tray icon, so it takes the fully
-// frameless treatment on every platform.
+// which leaves no way to close the window; `titleBarStyle: 'hidden'` keeps them
+// and lets us place them ourselves, centred in the title bar we draw. A menu bar
+// popover is the exception -- it is dismissed by clicking the tray icon, so it
+// takes the fully frameless treatment on every platform.
 function framingOptions() {
   if (cli.frame) return {};
   if (cli.menubar) return { frame: false };
-  return process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' } : { frame: false };
+  if (process.platform !== 'darwin') return { frame: false };
+  return {
+    titleBarStyle: 'hidden',
+    trafficLightPosition: { x: 12, y: Math.round((TITLE_BAR_HEIGHT - TRAFFIC_LIGHT_HEIGHT) / 2) }
+  };
+}
+
+// Zero unless the platform is drawing its window buttons inside our title bar,
+// which is only the case for a framed-off macOS window.
+function trafficLightInset() {
+  return process.platform === 'darwin' && !cli.frame && !cli.menubar ? TRAFFIC_LIGHT_INSET : 0;
 }
 
 function startupBounds() {
@@ -304,8 +393,8 @@ function createChromeView(page) {
       sandbox: true
     }
   });
-  // Transparent so the handle only paints its own grip and button; the
-  // navigation bar draws its own opaque background in CSS.
+  // Transparent so the title bar paints only its own band; the navigation bar
+  // draws its own opaque background in CSS.
   view.setBackgroundColor('#00000000');
   view.webContents.on('before-input-event', handleShortcut);
   view.webContents.loadFile(path.join(__dirname, page));
@@ -317,7 +406,6 @@ function createTab(url, { runScripts = false } = {}) {
 
   const view = new WebContentsView({
     webPreferences: {
-      preload: path.join(__dirname, 'content-preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -330,6 +418,11 @@ function createTab(url, { runScripts = false } = {}) {
     view,
     url,
     title: labelFor(classifyTarget(url)),
+    favicon: null,
+    faviconUrl: null,
+    faviconRequest: null,
+    loading: false,
+    htmlFullScreen: false,
     canGoBack: false,
     canGoForward: false,
     // Scripts are tied to the pages the user named, not to whatever they browse
@@ -344,10 +437,83 @@ function createTab(url, { runScripts = false } = {}) {
   contents.on('before-input-event', handleShortcut);
   contents.on('page-title-updated', (_event, title) => {
     tab.title = title;
-    if (mainWindow && tab.id === activeTabId && !cli.title) mainWindow.setTitle(title);
+    syncWindowTitle();
     pushState();
   });
-  contents.on('did-navigate', () => syncNavigationState(tab));
+  contents.on('page-favicon-updated', (_event, favicons) => loadFavicon(tab, favicons[0]));
+  // Both page gestures come from the browser process's own view of the input,
+  // which a page can influence but not forge: a script may dispatch a DOM event
+  // and it will not appear here.
+  //
+  // The limit is frames. Electron attaches its input observer to the primary
+  // main frame's widget only, and Chromium delivers a mouse event straight to
+  // the widget the hit test chose, so nothing here fires while the pointer is
+  // over an out-of-process iframe. A preload does not run in those frames
+  // either. Reaching them needs `nodeIntegrationInSubFrames`, which Electron
+  // marks experimental and which widens what a sub-frame can talk to.
+  contents.on('input-event', (_event, input) => {
+    if (tab.id !== activeTabId) return;
+
+    if (input.type === 'mouseDown') {
+      // Cleared whatever the button and whatever the bar is doing: a dwell
+      // begun on the way to a click must not open the bar a moment after the
+      // click asked to be left alone with the page.
+      clearEdgeDwell();
+      // The primary button only. Hiding the bar moves the page up by the height
+      // of the row, which would drag the page out from under the context menu
+      // the right button just opened.
+      if (input.button !== 'left' || !navigationVisible) return;
+      setNavigationVisible(false);
+      return;
+    }
+
+    if (input.type === 'mouseMove') {
+      if (input.y > EDGE_HEIGHT) {
+        clearEdgeDwell();
+        return;
+      }
+      if (edgeDwellTimer !== null || navigationVisible) return;
+      edgeDwellTimer = setTimeout(() => {
+        edgeDwellTimer = null;
+        // A page in full screen has the screen; a bar over it would fight what
+        // the user asked for.
+        if (tab.id !== activeTabId || tab.htmlFullScreen) return;
+        if (!navigationVisible) setNavigationVisible(true, { transient: true });
+      }, EDGE_DWELL_MS);
+      return;
+    }
+
+    // The pointer leaving mid-dwell must not trip the reveal behind it.
+    if (input.type === 'mouseLeave') clearEdgeDwell();
+  });
+  // A video going full screen inside the page never reaches the window's own
+  // full-screen events, but it wants the same treatment. A background tab that
+  // does it must not take the chrome away from the tab in front.
+  contents.on('enter-html-full-screen', () => {
+    tab.htmlFullScreen = true;
+    if (tab.id === activeTabId) relayout();
+  });
+  contents.on('leave-html-full-screen', () => {
+    tab.htmlFullScreen = false;
+    if (tab.id === activeTabId) relayout();
+  });
+  contents.on('did-start-loading', () => {
+    tab.loading = true;
+    pushState();
+  });
+  contents.on('did-stop-loading', () => {
+    tab.loading = false;
+    pushState();
+  });
+  contents.on('did-navigate', () => {
+    // The icon belongs to the page that was left behind; keeping it would put
+    // the wrong site's mark next to the new title until the new one arrives.
+    // Its fetch goes with it -- the answer is for a page nobody is on now.
+    if (tab.faviconRequest) tab.faviconRequest.abort();
+    tab.favicon = null;
+    tab.faviconUrl = null;
+    syncNavigationState(tab);
+  });
   contents.on('did-navigate-in-page', () => syncNavigationState(tab));
   contents.on('did-finish-load', () => {
     syncNavigationState(tab);
@@ -357,7 +523,7 @@ function createTab(url, { runScripts = false } = {}) {
     }
   });
   contents.on('did-fail-load', (_event, code, description, failedUrl, isMainFrame) => {
-    if (isMainFrame) console.error(`ostinato: failed to load ${failedUrl}: ${description} (${code})`);
+    if (isMainFrame) console.error(`mullion: failed to load ${failedUrl}: ${description} (${code})`);
   });
 
   // Links that ask for a new window become a tab here; letting them through
@@ -374,11 +540,16 @@ function createTab(url, { runScripts = false } = {}) {
     shell.openExternal(requestedUrl);
   });
 
+  contents.on('context-menu', () => showContentMenu(tab));
+
   mainWindow.contentView.addChildView(view);
-  // Child views stack in insertion order, so the handle has to be lifted back
+  // Child views stack in insertion order, so the chrome has to be lifted back
   // above the page every time a tab is added or it ends up behind it.
-  mainWindow.contentView.removeChildView(handleView);
-  mainWindow.contentView.addChildView(handleView);
+  for (const chrome of [navigationView, titleBarView]) {
+    if (!chrome) continue;
+    mainWindow.contentView.removeChildView(chrome);
+    mainWindow.contentView.addChildView(chrome);
+  }
 
   contents.loadURL(url);
   if (cli.openDevtools) contents.openDevTools({ mode: 'detach' });
@@ -391,7 +562,80 @@ function syncNavigationState(tab) {
   tab.url = tab.view.webContents.getURL();
   tab.canGoBack = tab.view.webContents.navigationHistory.canGoBack();
   tab.canGoForward = tab.view.webContents.navigationHistory.canGoForward();
+  syncWindowTitle();
   pushState();
+}
+
+// `session.fetch` follows `file:` and any registered custom protocol, so an
+// unchecked favicon URL would let a remote page make the main process read a
+// local file and draw it in the chrome. Nothing but http(s) is worth the risk;
+// `data:` is not supported by fetch at all, so those are dropped here rather
+// than failing later.
+function faviconFetchable(url) {
+  return typeof url === 'string' && /^https?:\/\//i.test(url);
+}
+
+// The body is read incrementally and abandoned the moment it goes over the
+// limit. Reading it whole first and checking the length afterwards is what the
+// limit was supposed to prevent.
+async function readCapped(response, limit) {
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > limit) {
+    await response.body.cancel();
+    return null;
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > limit) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(Buffer.from(value));
+  }
+  return Buffer.concat(chunks);
+}
+
+// Fetched in the page's own session, then decoded and re-encoded as a PNG data
+// URL. The title bar therefore never makes a request of its own -- which would
+// leak out of the content partition -- and never receives bytes it has not
+// already been told are an image. An icon that does not decode is left out.
+async function loadFavicon(tab, url) {
+  if (!faviconFetchable(url) || tab.faviconUrl === url) return;
+  tab.faviconUrl = url;
+
+  // One request per tab: a page can name a new icon as often as it likes, and
+  // each one would otherwise start a fetch that nothing ever stops.
+  if (tab.faviconRequest) tab.faviconRequest.abort();
+  const request = new AbortController();
+  tab.faviconRequest = request;
+  const timeout = setTimeout(() => request.abort(), FAVICON_TIMEOUT_MS);
+
+  try {
+    const response = await session.fromPartition(CONTENT_PARTITION).fetch(url, { signal: request.signal });
+    if (!response.ok) {
+      await response.body.cancel();
+      return;
+    }
+    const bytes = await readCapped(response, MAX_FAVICON_BYTES);
+    if (!bytes || bytes.length === 0 || imageTooLarge(bytes, MAX_FAVICON_EDGE)) return;
+    const image = nativeImage.createFromBuffer(bytes);
+    if (image.isEmpty()) return;
+    // The page may have moved on while the icon was in flight.
+    if (tab.faviconUrl !== url || !tabs.has(tab.id)) return;
+    tab.favicon = image.resize({ width: FAVICON_SIZE, height: FAVICON_SIZE }).toDataURL();
+    pushState();
+  } catch {
+    // A favicon that cannot be fetched is not worth a message.
+  } finally {
+    clearTimeout(timeout);
+    if (tab.faviconRequest === request) tab.faviconRequest = null;
+  }
 }
 
 async function runInjections(tab) {
@@ -401,7 +645,7 @@ async function runInjections(tab) {
       // and a script that opens a video is the point of the feature.
       await tab.view.webContents.executeJavaScript(injection.code, true);
     } catch (error) {
-      console.error(`ostinato: script from ${injection.origin} failed: ${error.message}`);
+      console.error(`mullion: script from ${injection.origin} failed: ${error.message}`);
     }
   }
 }
@@ -411,7 +655,8 @@ function selectTab(tabId) {
   activeTabId = tabId;
   for (const [id, tab] of tabs) tab.view.setVisible(id === tabId);
   const active = tabs.get(tabId);
-  if (!cli.title) mainWindow.setTitle(active.title || 'Ostinato');
+  clearEdgeDwell();
+  syncWindowTitle();
   active.view.webContents.focus();
   relayout();
 }
@@ -423,6 +668,7 @@ function disposeTab(tabId) {
   const tab = tabs.get(tabId);
   if (!tab) return;
   tabs.delete(tabId);
+  if (tab.faviconRequest) tab.faviconRequest.abort();
   mainWindow.contentView.removeChildView(tab.view);
   tab.view.webContents.close();
 }
@@ -451,30 +697,85 @@ function activeTab() {
   return activeTabId ? tabs.get(activeTabId) : null;
 }
 
+// Cmd/Ctrl+W is an application accelerator, so it fires wherever focus is. The
+// QR window is a BrowserWindow and the main window is not, so anything the
+// focus query returns is a secondary window that should take the keystroke.
+function closeFocused() {
+  const focused = BrowserWindow.getFocusedWindow();
+  if (focused) {
+    focused.close();
+    return;
+  }
+  if (activeTabId) closeTab(activeTabId);
+}
+
 // The tab strip earns its space once there is a choice to make, so a single-tab
 // window stays completely bare. Both the layout and the renderer state read it.
+//
+// In full screen it waits to be asked for, the way a browser's toolbar does,
+// rather than standing between the page and the top of the screen.
 function isTabBarVisible() {
+  if (windowFullScreen && !navigationVisible) return false;
   return navigationVisible || tabs.size > 1;
+}
+
+function clearEdgeDwell() {
+  if (edgeDwellTimer === null) return;
+  clearTimeout(edgeDwellTimer);
+  edgeDwellTimer = null;
 }
 
 function relayout() {
   if (!mainWindow || !navigationView) return;
   const { width, height } = mainWindow.getContentBounds();
 
-  const bandHeight = (navigationVisible ? TOOLBAR_HEIGHT : 0) + (isTabBarVisible() ? TAB_BAR_HEIGHT : 0);
-  const contentHeight = Math.max(height - bandHeight, MIN_CONTENT_HEIGHT);
+  // The two kinds of full screen do not mean the same thing. A page that went
+  // full screen has asked for the screen outright, so nothing may cover it. A
+  // window in full screen is closer to a maximised window: the bands stop
+  // taking space, but Cmd+L and the top edge can still call them back.
+  //
+  // Outside both, the title bar keeps its row whatever else is shown, so that
+  // neither the window buttons nor the drag area sit over the page.
+  const active = activeTab();
+  const pageFullScreen = Boolean(active && active.htmlFullScreen);
+  const showTitleBar = Boolean(titleBarView) && !windowFullScreen && !pageFullScreen;
+  const titleBarHeight = showTitleBar ? TITLE_BAR_HEIGHT : 0;
+  const bandHeight = pageFullScreen ? 0 : (navigationVisible ? TOOLBAR_HEIGHT : 0) + (isTabBarVisible() ? TAB_BAR_HEIGHT : 0);
+  const topHeight = titleBarHeight + bandHeight;
+  const contentHeight = Math.max(height - topHeight, MIN_CONTENT_HEIGHT);
 
-  navigationView.setBounds({ x: 0, y: 0, width, height: bandHeight });
+  if (titleBarView) {
+    titleBarView.setBounds({ x: 0, y: 0, width, height: titleBarHeight });
+    titleBarView.setVisible(showTitleBar);
+  }
+
+  navigationView.setBounds({ x: 0, y: titleBarHeight, width, height: bandHeight });
   navigationView.setVisible(bandHeight > 0);
 
   for (const [id, tab] of tabs) {
-    tab.view.setBounds({ x: 0, y: bandHeight, width, height: contentHeight });
+    tab.view.setBounds({ x: 0, y: topHeight, width, height: contentHeight });
     tab.view.setVisible(id === activeTabId);
   }
 
-  handleView.setBounds({ x: Math.max(width - HANDLE_WIDTH, 0), y: 0, width: Math.min(HANDLE_WIDTH, width), height: HANDLE_HEIGHT });
-  handleView.setVisible(!navigationVisible);
+  pushState();
+}
 
+// --title pins the title against the page; otherwise it is the page's own
+// title, or its address when the title bar was switched over to showing that.
+function windowTitle() {
+  if (cli.title) return cli.title;
+  const active = activeTab();
+  if (!active) return APP_NAME;
+  return (showUrl ? active.url : active.title) || APP_NAME;
+}
+
+function syncWindowTitle() {
+  if (mainWindow && !cli.title) mainWindow.setTitle(windowTitle());
+}
+
+function setShowUrl(value) {
+  showUrl = value;
+  syncWindowTitle();
   pushState();
 }
 
@@ -482,6 +783,10 @@ function buildState() {
   return {
     navigationVisible,
     tabBarVisible: isTabBarVisible(),
+    title: windowTitle(),
+    titleBarInset: trafficLightInset(),
+    favicon: (activeTab() && activeTab().favicon) || null,
+    loading: Boolean(activeTab() && activeTab().loading),
     activeTabId,
     tabs: [...tabs.values()].map((tab) => ({
       id: tab.id,
@@ -494,34 +799,51 @@ function buildState() {
 }
 
 function pushState() {
-  if (!navigationView || navigationView.webContents.isDestroyed()) return;
-  navigationView.webContents.send('state', buildState());
+  const state = buildState();
+  for (const view of [navigationView, titleBarView]) {
+    if (!view || view.webContents.isDestroyed()) continue;
+    view.webContents.send('state', state);
+  }
 }
 
-function setNavigationVisible(visible, { pinned = false } = {}) {
-  if (hoverHideTimer !== null) {
-    clearTimeout(hoverHideTimer);
-    hoverHideTimer = null;
-  }
+function clearHoverHide() {
+  if (hoverHideTimer === null) return;
+  clearTimeout(hoverHideTimer);
+  hoverHideTimer = null;
+}
+
+// `pinned` is the user's standing answer to "should the bar be up", and it is
+// written to settings.json. `transient` says this reveal is a peek and has no
+// opinion on that question -- the top-edge hover, which would otherwise report
+// "not pinned" and quietly turn the preference off.
+function setNavigationVisible(visible, { pinned = false, transient = false } = {}) {
+  // Whatever decided this, it outranks a dwell that has not fired yet.
+  clearEdgeDwell();
+  clearHoverHide();
   navigationVisible = visible;
-  navigationPinned = visible && pinned;
+  if (!transient) navigationPinned = visible && pinned;
   relayout();
 
   // A bar that was revealed by hovering the top edge puts itself away again;
-  // one the user asked for stays.
+  // one the user asked for stays. Nothing needs to re-check the pin when the
+  // timer fires: anything that could have changed it came through here and
+  // cancelled the timer on the way.
   if (visible && !pinned) {
     hoverHideTimer = setTimeout(() => {
       hoverHideTimer = null;
-      if (!navigationPinned) {
-        navigationVisible = false;
-        relayout();
-      }
+      navigationVisible = false;
+      relayout();
     }, 2000);
   }
 }
 
 function focusUrlBar() {
   if (!navigationView || navigationView.webContents.isDestroyed()) return;
+  // A page in full screen has the screen. Putting a bar over it would fight
+  // what the user just asked for, and the pin would outlive the moment by
+  // being written to the settings.
+  const active = activeTab();
+  if (active && active.htmlFullScreen) return;
   setNavigationVisible(true, { pinned: true });
   navigationView.webContents.focus();
   navigationView.webContents.send('focus-url');
@@ -541,6 +863,11 @@ function normalizeInput(input) {
 // accelerator: handling a key in both places would run the command twice.
 function handleShortcut(event, input) {
   if (input.type !== 'keyDown' || input.key !== 'Escape' || !navigationVisible) return;
+  // While a page is full screen the bar is off screen even though it is still
+  // "visible", and Escape belongs to the page: it is how full screen ends.
+  // Swallowing it here costs the user a second press for no visible effect.
+  const active = activeTab();
+  if (active && active.htmlFullScreen) return;
   setNavigationVisible(false);
   event.preventDefault();
 }
@@ -561,6 +888,126 @@ function adjustZoom(delta) {
   });
 }
 
+// Only the schemes a browser or the file manager would sensibly take. Handing
+// `data:` or a custom scheme to the OS from a menu the page can influence is
+// not worth the risk.
+function openActiveExternal() {
+  const tab = activeTab();
+  if (tab && /^(https?|file):/i.test(tab.url)) shell.openExternal(tab.url);
+}
+
+function screenshotName(tab) {
+  let host = 'page';
+  try {
+    host = new URL(tab.url).hostname || host;
+  } catch {
+    // A blank or malformed URL just keeps the fallback name.
+  }
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  return `mullion-${host.replace(/[^a-zA-Z0-9.-]/g, '_')}-${stamp}.png`;
+}
+
+// Captures the page only, not the surrounding chrome: the view is what the tab
+// owns, and it is the part anyone asking for a screenshot means.
+async function takeScreenshot() {
+  const tab = activeTab();
+  if (!tab) return;
+  const file = path.join(app.getPath('downloads'), screenshotName(tab));
+  try {
+    const image = await tab.view.webContents.capturePage();
+    fs.writeFileSync(file, image.toPNG());
+    console.log(`mullion: screenshot saved to ${file}`);
+    shell.showItemInFolder(file);
+  } catch (error) {
+    console.error(`mullion: could not save the screenshot: ${error.message}`);
+  }
+}
+
+// The matrix is computed here and handed over as data, so the QR window never
+// has to be told the URL in a form it could act on.
+function showQrCode() {
+  const tab = activeTab();
+  if (!tab) return;
+  if (!canShowQrCode(tab)) {
+    // Reachable from the View menu, whose items are built once and cannot grey
+    // themselves out per tab. Silence here reads as a broken menu item.
+    const tooLong = /^https?:/i.test(tab.url);
+    dialog.showMessageBox({
+      type: 'info',
+      message: tooLong ? 'This URL is too long for a QR code.' : 'There is no web address to encode.',
+      detail: tooLong
+        ? `The limit is ${qrcode.capacityBytes(qrcode.MAX_VERSION)} bytes and this one is ${Buffer.byteLength(tab.url)}.`
+        : 'A QR code is only offered for http and https pages.'
+    });
+    return;
+  }
+
+  let code;
+  try {
+    code = qrcode.encode(tab.url);
+  } catch (error) {
+    console.error(`mullion: could not build a QR code: ${error.message}`);
+    return;
+  }
+
+  // One at a time: a second "Show QR Code" replaces the window rather than
+  // stacking another one on top of it.
+  if (qrWindow && !qrWindow.isDestroyed()) qrWindow.destroy();
+
+  qrWindow = new BrowserWindow({
+    width: 300,
+    height: 340,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    title: 'QR Code',
+    backgroundColor: '#1b1c1f',
+    alwaysOnTop: cli.alwaysOnTop || cli.menubar,
+    webPreferences: {
+      preload: path.join(__dirname, 'qr-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  });
+
+  const opened = qrWindow;
+  const contentsId = opened.webContents.id;
+  qrPayloads.set(contentsId, { url: tab.url, code });
+  opened.on('closed', () => {
+    qrPayloads.delete(contentsId);
+    // A replacement may already have been opened by the time this arrives.
+    if (qrWindow === opened) qrWindow = null;
+  });
+  opened.loadFile(path.join(__dirname, 'qr.html'));
+}
+
+// The encoder tops out at version 10. A URL past that is not rare -- tracking
+// parameters get there easily -- so the menu says so by going grey instead of
+// letting the click do nothing.
+function canShowQrCode(tab) {
+  return Boolean(tab) && /^https?:/i.test(tab.url) && Buffer.byteLength(tab.url) <= qrcode.capacityBytes(qrcode.MAX_VERSION);
+}
+
+function showContentMenu(tab) {
+  if (!mainWindow) return;
+  const contents = tab.view.webContents;
+  const history = contents.navigationHistory;
+
+  Menu.buildFromTemplate([
+    { label: 'Back', enabled: history.canGoBack(), click: () => history.goBack() },
+    { label: 'Forward', enabled: history.canGoForward(), click: () => history.goForward() },
+    { label: 'Reload', click: () => contents.reload() },
+    { type: 'separator' },
+    { label: 'Show Navigation Bar', click: focusUrlBar },
+    { label: 'Take Screenshot', click: takeScreenshot },
+    { label: 'Open in Default Browser', enabled: /^(https?|file):/i.test(tab.url), click: openActiveExternal },
+    { label: 'Show QR Code', enabled: canShowQrCode(tab), click: showQrCode },
+    { type: 'separator' },
+    { label: 'Restart', click: restartTargets }
+  ]).popup({ window: mainWindow });
+}
+
 function buildAppMenu() {
   const isMac = process.platform === 'darwin';
   return Menu.buildFromTemplate([
@@ -569,7 +1016,7 @@ function buildAppMenu() {
       label: 'File',
       submenu: [
         { label: 'New Tab', accelerator: 'CmdOrCtrl+T', click: () => { createTab(BLANK_URL); focusUrlBar(); } },
-        { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', click: () => activeTabId && closeTab(activeTabId) },
+        { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', click: closeFocused },
         { type: 'separator' },
         // Cmd+W belongs to the tab, so closing the window moves to Cmd+Shift+W.
         ...(isMac ? [{ role: 'close', accelerator: 'CmdOrCtrl+Shift+W' }] : [{ role: 'quit' }])
@@ -580,9 +1027,31 @@ function buildAppMenu() {
       label: 'View',
       submenu: [
         { label: 'Show Navigation Bar', accelerator: 'CmdOrCtrl+L', click: focusUrlBar },
+        {
+          label: 'Show URL in Title Bar',
+          type: 'checkbox',
+          checked: showUrl,
+          click: (item) => setShowUrl(item.checked)
+        },
         { label: 'Reload', accelerator: 'CmdOrCtrl+R', click: withActiveTab((contents) => contents.reload()) },
         { label: 'Restart', click: restartTargets },
         { type: 'separator' },
+        { label: 'Take Screenshot', accelerator: 'CmdOrCtrl+Shift+S', click: takeScreenshot },
+        { label: 'Open in Default Browser', click: openActiveExternal },
+        { label: 'Show QR Code', click: showQrCode },
+        { type: 'separator' },
+        // A frameless window has no zoom button, so without this there is no
+        // way into full screen at all off macOS.
+        ...(cli.menubar
+          ? []
+          : [
+              {
+                label: 'Toggle Full Screen',
+                accelerator: isMac ? 'Ctrl+Cmd+F' : 'F11',
+                click: () => mainWindow && mainWindow.setFullScreen(!mainWindow.isFullScreen())
+              },
+              { type: 'separator' }
+            ]),
         { label: 'Back', accelerator: 'CmdOrCtrl+[', click: withActiveTab((contents) => contents.navigationHistory.canGoBack() && contents.navigationHistory.goBack()) },
         { label: 'Forward', accelerator: 'CmdOrCtrl+]', click: withActiveTab((contents) => contents.navigationHistory.canGoForward() && contents.navigationHistory.goForward()) },
         { type: 'separator' },
@@ -607,7 +1076,7 @@ function createTray() {
   // other platforms the flag is ignored.
   icon.setTemplateImage(true);
   tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon);
-  tray.setToolTip(cli.title || 'Ostinato');
+  tray.setToolTip(cli.title || 'Mullion');
 
   tray.setContextMenu(
     Menu.buildFromTemplate([
@@ -669,6 +1138,7 @@ function persistState() {
     // A menu bar popover is sized by its flags, so its geometry is not recorded.
     bounds: cli.menubar ? persisted.bounds : mainWindow.getBounds(),
     navigationPinned,
+    showUrl,
     zoom: persisted.zoom,
     lastUrls: persisted.lastUrls
   });
@@ -683,13 +1153,8 @@ ipcMain.handle('select-tab', (_event, tabId) => selectTab(tabId));
 ipcMain.handle('close-tab', (_event, tabId) => closeTab(tabId));
 ipcMain.handle('hide-navigation', () => setNavigationVisible(false));
 ipcMain.handle('show-navigation', () => setNavigationVisible(true, { pinned: true }));
-ipcMain.handle('open-external', () => {
-  const tab = activeTab();
-  // Only the schemes a browser or the file manager would sensibly take. Handing
-  // `data:` or a custom scheme to the OS from a button the page can influence
-  // is not worth the risk.
-  if (tab && /^(https?|file):/i.test(tab.url)) shell.openExternal(tab.url);
-});
+ipcMain.handle('open-external', openActiveExternal);
+ipcMain.handle('get-qr', (event) => qrPayloads.get(event.sender.id) || null);
 ipcMain.handle('navigate', (_event, input) => {
   const tab = activeTab();
   const url = normalizeInput(String(input || '').trim());
@@ -707,9 +1172,4 @@ ipcMain.handle('go', (_event, action) => {
   if (action === 'back' && history.canGoBack()) history.goBack();
   else if (action === 'forward' && history.canGoForward()) history.goForward();
   else if (action === 'reload') tab.view.webContents.reload();
-});
-
-// Sent by content-preload when the pointer dwells on the very top edge.
-ipcMain.on('edge-hover', () => {
-  if (!navigationVisible) setNavigationVisible(true);
 });

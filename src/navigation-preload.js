@@ -5,7 +5,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 // The navigation bar renderer is sandboxed, so this is the whole surface it can
 // reach. Every entry is a named command -- nothing here forwards arbitrary
 // channel names, which would let a compromised renderer talk to any handler.
-contextBridge.exposeInMainWorld('ostinato', {
+contextBridge.exposeInMainWorld('mullion', {
   getState: () => ipcRenderer.invoke('get-state'),
   navigate: (url) => ipcRenderer.invoke('navigate', url),
   go: (action) => ipcRenderer.invoke('go', action),

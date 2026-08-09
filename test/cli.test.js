@@ -34,10 +34,12 @@ test('negative window positions are allowed but sizes are not', () => {
 });
 
 test('boolean options are recognised and reject values', () => {
-  const cli = parseCli(['--menubar', '--always-on-top', '--js-every-load']);
+  const cli = parseCli(['--menubar', '--always-on-top', '--js-every-load', '--show-url']);
   assert.equal(cli.menubar, true);
   assert.equal(cli.alwaysOnTop, true);
   assert.equal(cli.jsEveryLoad, true);
+  assert.equal(cli.showUrl, true);
+  assert.equal(parseCli([]).showUrl, false);
 
   const bad = parseCli(['--menubar=yes']);
   assert.match(bad.errors[0], /does not take a value/);
