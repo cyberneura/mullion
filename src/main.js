@@ -321,6 +321,10 @@ function createWindow() {
       hoverHideTimer = null;
     }
     clearEdgeDwell();
+    // The QR window is a window in its own right, so off macOS it keeps
+    // `window-all-closed` from firing: the app would stay running with nothing
+    // left but a code for a page that is gone.
+    if (qrWindow && !qrWindow.isDestroyed()) qrWindow.destroy();
     mainWindow = null;
     navigationView = null;
     titleBarView = null;
