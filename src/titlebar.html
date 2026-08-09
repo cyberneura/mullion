@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- img-src allows data: for the favicon. The bytes arrive already decoded
+         and re-encoded by the main process; this view never fetches anything,
+         which would take the page's icon out of its own session. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:" />
+    <link rel="stylesheet" href="styles/titlebar.css" />
+    <title>Mullion title bar</title>
+  </head>
+  <body>
+    <!-- The band the window is dragged by. It is a reserved row rather than an
+         overlay so the window buttons never sit on top of the page. -->
+    <div id="inset" class="inset"></div>
+    <button id="title" class="title" type="button" title="Show the navigation bar">
+      <span id="mark" class="mark"><img id="favicon" class="favicon" alt="" hidden /></span>
+      <span id="label" class="label"></span>
+    </button>
+    <div class="grip"></div>
+    <script src="titlebar.js"></script>
+  </body>
+</html>

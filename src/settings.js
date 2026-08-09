@@ -16,6 +16,7 @@ function defaultState() {
   return {
     bounds: null,
     navigationPinned: false,
+    showUrl: false,
     zoom: 1,
     lastUrls: []
   };
@@ -50,6 +51,7 @@ function loadState() {
 
     state.bounds = sanitizeBounds(stored.bounds);
     if (typeof stored.navigationPinned === 'boolean') state.navigationPinned = stored.navigationPinned;
+    if (typeof stored.showUrl === 'boolean') state.showUrl = stored.showUrl;
     if (isFiniteNumber(stored.zoom) && stored.zoom > 0) state.zoom = stored.zoom;
     if (Array.isArray(stored.lastUrls)) {
       state.lastUrls = stored.lastUrls.filter((url) => typeof url === 'string').slice(0, 20);
@@ -68,6 +70,7 @@ function saveState(state) {
     state: {
       bounds: sanitizeBounds(state.bounds),
       navigationPinned: Boolean(state.navigationPinned),
+      showUrl: Boolean(state.showUrl),
       zoom: isFiniteNumber(state.zoom) && state.zoom > 0 ? state.zoom : 1,
       lastUrls: Array.isArray(state.lastUrls) ? state.lastUrls.filter((url) => typeof url === 'string').slice(0, 20) : []
     }

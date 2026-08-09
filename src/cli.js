@@ -1,6 +1,6 @@
 'use strict';
 
-// Pure argument parser for the `ostinato` command. Kept free of Electron imports
+// Pure argument parser for the `mullion` command. Kept free of Electron imports
 // so it can be unit tested with `node --test` without launching a browser.
 
 const DEFAULTS = {
@@ -42,6 +42,7 @@ const BOOLEAN_OPTIONS = {
   '--menubar': 'menubar',
   '--frame': 'frame',
   '--restore': 'restore',
+  '--show-url': 'showUrl',
   '--js-every-load': 'jsEveryLoad',
   '--open-devtools': 'openDevtools',
   '--help': 'help',
@@ -89,6 +90,7 @@ function parseCli(argv) {
     menubar: false,
     frame: false,
     restore: false,
+    showUrl: false,
     jsEveryLoad: false,
     openDevtools: false,
     help: false,
@@ -189,12 +191,12 @@ function parseCli(argv) {
 }
 
 function helpText(version) {
-  return `ostinato ${version}
+  return `mullion ${version}
 
 A frameless browser window for leaving a page playing.
 
 Usage:
-  ostinato [options] [target ...]
+  mullion [options] [target ...]
 
 Targets:
   https://example.com     open as a URL
@@ -215,6 +217,7 @@ Options:
   --new-window            open a new window even if one is already running
   --menubar               run as a menu bar / tray application
   --restore               reopen the pages from the previous session
+  --show-url              show the URL in the title bar instead of the title
   --js <code>             run JavaScript after the page loads
   --js-file <path>        run JavaScript from a file after the page loads
   --playwright <code>     run Playwright-compatible code after the page loads

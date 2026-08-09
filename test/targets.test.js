@@ -7,7 +7,7 @@ const os = require('node:os');
 
 const { classifyTarget, labelFor, fileKindFor } = require('../src/targets');
 
-const CWD = '/tmp/ostinato-test';
+const CWD = '/tmp/mullion-test';
 const nothingExists = () => false;
 const everythingExists = () => true;
 
@@ -86,7 +86,7 @@ test('labels prefer the file name and the host', () => {
   assert.equal(labelFor(classifyTarget('/docs/deck.pdf', { cwd: CWD, exists: nothingExists })), 'deck.pdf');
   assert.equal(labelFor(classifyTarget('https://example.com/a', { cwd: CWD, exists: nothingExists })), 'example.com');
   assert.equal(labelFor(classifyTarget('-')), 'stdin');
-  assert.equal(labelFor(null), 'Ostinato');
+  assert.equal(labelFor(null), 'Mullion');
 });
 
 test('extension matching is case insensitive', () => {

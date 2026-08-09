@@ -10,6 +10,7 @@ const reloadButton = document.getElementById('reload');
 const externalButton = document.getElementById('external');
 const collapseButton = document.getElementById('collapse');
 const newTabButton = document.getElementById('new-tab');
+const closeIcon = document.getElementById('close-icon');
 
 // While the user is editing the address bar, incoming state must not overwrite
 // what they are typing -- state arrives on every navigation event.
@@ -26,17 +27,17 @@ urlInput.addEventListener('blur', () => {
 
 urlInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
-    window.ostinato.navigate(urlInput.value.trim());
+    window.mullion.navigate(urlInput.value.trim());
     urlInput.blur();
   }
 });
 
-backButton.addEventListener('click', () => window.ostinato.go('back'));
-forwardButton.addEventListener('click', () => window.ostinato.go('forward'));
-reloadButton.addEventListener('click', () => window.ostinato.go('reload'));
-externalButton.addEventListener('click', () => window.ostinato.openExternal());
-collapseButton.addEventListener('click', () => window.ostinato.hideNavigation());
-newTabButton.addEventListener('click', () => window.ostinato.newTab());
+backButton.addEventListener('click', () => window.mullion.go('back'));
+forwardButton.addEventListener('click', () => window.mullion.go('forward'));
+reloadButton.addEventListener('click', () => window.mullion.go('reload'));
+externalButton.addEventListener('click', () => window.mullion.openExternal());
+collapseButton.addEventListener('click', () => window.mullion.hideNavigation());
+newTabButton.addEventListener('click', () => window.mullion.newTab());
 
 // Tab elements are rebuilt from scratch on each state update. The list is at
 // most a handful of nodes, so diffing would cost more than it saves.
@@ -45,7 +46,7 @@ function renderTabs(state) {
   for (const tab of state.tabs) {
     const element = document.createElement('div');
     element.className = tab.id === state.activeTabId ? 'tab active' : 'tab';
-    element.addEventListener('click', () => window.ostinato.selectTab(tab.id));
+    element.addEventListener('click', () => window.mullion.selectTab(tab.id));
 
     const title = document.createElement('span');
     title.className = 'tab-title';
@@ -57,10 +58,12 @@ function renderTabs(state) {
     const close = document.createElement('button');
     close.className = 'tab-close';
     close.type = 'button';
-    close.textContent = '×';
+    close.title = 'Close tab';
+    close.setAttribute('aria-label', 'Close tab');
+    close.append(closeIcon.content.cloneNode(true));
     close.addEventListener('click', (event) => {
       event.stopPropagation();
-      window.ostinato.closeTab(tab.id);
+      window.mullion.closeTab(tab.id);
     });
     element.append(close);
 
@@ -79,10 +82,10 @@ function render(state) {
   forwardButton.disabled = !(active && active.canGoForward);
 }
 
-window.ostinato.onState(render);
-window.ostinato.onFocusUrl(() => {
+window.mullion.onState(render);
+window.mullion.onFocusUrl(() => {
   urlInput.focus();
   urlInput.select();
 });
 
-window.ostinato.getState().then(render);
+window.mullion.getState().then(render);
