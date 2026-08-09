@@ -298,11 +298,14 @@ function createWindow() {
     // and leaving full screen puts back whatever was chosen.
     navigationVisible = false;
     clearEdgeDwell();
+    clearHoverHide();
     relayout();
   });
   mainWindow.on('leave-full-screen', () => {
     windowFullScreen = false;
     navigationVisible = navigationPinned;
+    clearEdgeDwell();
+    clearHoverHide();
     relayout();
   });
   mainWindow.on('close', (event) => {
@@ -316,10 +319,7 @@ function createWindow() {
     persistState();
   });
   mainWindow.on('closed', () => {
-    if (hoverHideTimer !== null) {
-      clearTimeout(hoverHideTimer);
-      hoverHideTimer = null;
-    }
+    clearHoverHide();
     clearEdgeDwell();
     // The QR window is a window in its own right, so off macOS it keeps
     // `window-all-closed` from firing: the app would stay running with nothing
@@ -478,7 +478,7 @@ function createTab(url, { runScripts = false } = {}) {
         // A page in full screen has the screen; a bar over it would fight what
         // the user asked for.
         if (tab.id !== activeTabId || tab.htmlFullScreen) return;
-        if (!navigationVisible) setNavigationVisible(true);
+        if (!navigationVisible) setNavigationVisible(true, { transient: true });
       }, EDGE_DWELL_MS);
       return;
     }
@@ -806,26 +806,33 @@ function pushState() {
   }
 }
 
-function setNavigationVisible(visible, { pinned = false } = {}) {
+function clearHoverHide() {
+  if (hoverHideTimer === null) return;
+  clearTimeout(hoverHideTimer);
+  hoverHideTimer = null;
+}
+
+// `pinned` is the user's standing answer to "should the bar be up", and it is
+// written to settings.json. `transient` says this reveal is a peek and has no
+// opinion on that question -- the top-edge hover, which would otherwise report
+// "not pinned" and quietly turn the preference off.
+function setNavigationVisible(visible, { pinned = false, transient = false } = {}) {
   // Whatever decided this, it outranks a dwell that has not fired yet.
   clearEdgeDwell();
-  if (hoverHideTimer !== null) {
-    clearTimeout(hoverHideTimer);
-    hoverHideTimer = null;
-  }
+  clearHoverHide();
   navigationVisible = visible;
-  navigationPinned = visible && pinned;
+  if (!transient) navigationPinned = visible && pinned;
   relayout();
 
   // A bar that was revealed by hovering the top edge puts itself away again;
-  // one the user asked for stays.
+  // one the user asked for stays. Nothing needs to re-check the pin when the
+  // timer fires: anything that could have changed it came through here and
+  // cancelled the timer on the way.
   if (visible && !pinned) {
     hoverHideTimer = setTimeout(() => {
       hoverHideTimer = null;
-      if (!navigationPinned) {
-        navigationVisible = false;
-        relayout();
-      }
+      navigationVisible = false;
+      relayout();
     }, 2000);
   }
 }
