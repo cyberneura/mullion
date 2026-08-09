@@ -290,10 +290,19 @@ function createWindow() {
   // that the page gets the whole screen.
   mainWindow.on('enter-full-screen', () => {
     windowFullScreen = true;
+    // Asking for full screen is asking for the screen, so a bar that is already
+    // up comes down with the rest of the chrome. `navigationPinned` is left
+    // alone rather than run through setNavigationVisible(): the pin is the
+    // user's standing choice, it is written to settings.json, and full screen
+    // is not a decision to change it. Cmd+L and the top edge still work here,
+    // and leaving full screen puts back whatever was chosen.
+    navigationVisible = false;
+    clearEdgeDwell();
     relayout();
   });
   mainWindow.on('leave-full-screen', () => {
     windowFullScreen = false;
+    navigationVisible = navigationPinned;
     relayout();
   });
   mainWindow.on('close', (event) => {
