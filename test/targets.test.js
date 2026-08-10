@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const os = require('node:os');
 
-const { classifyTarget, labelFor, fileKindFor } = require('../src/targets');
+const { classifyTarget, labelFor, fileKindFor, isBlankUrl } = require('../src/targets');
 
 const CWD = '/tmp/mullion-test';
 const nothingExists = () => false;
@@ -91,4 +91,23 @@ test('labels prefer the file name and the host', () => {
 
 test('extension matching is case insensitive', () => {
   assert.equal(fileKindFor('/a/B.JSON'), 'json');
+});
+
+// The blank page drives whether the navigation bar can be put away, so a URL
+// that is the blank page wearing a fragment must not read as a real one.
+test('a fragment or query does not stop a URL being the blank page', () => {
+  assert.equal(isBlankUrl('about:blank'), true);
+  assert.equal(isBlankUrl('about:blank#x'), true);
+  assert.equal(isBlankUrl('about:blank?x'), true);
+  assert.equal(isBlankUrl('about:blank#?a=b'), true);
+});
+
+test('only the blank page itself is the blank page', () => {
+  assert.equal(isBlankUrl('about:blankfoo'), false);
+  assert.equal(isBlankUrl('about:blan'), false);
+  assert.equal(isBlankUrl('https://example.com/#about:blank'), false);
+  assert.equal(isBlankUrl('https://example.com/?u=about:blank'), false);
+  assert.equal(isBlankUrl(''), false);
+  assert.equal(isBlankUrl(null), false);
+  assert.equal(isBlankUrl(undefined), false);
 });

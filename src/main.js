@@ -8,7 +8,7 @@ const { pathToFileURL } = require('node:url');
 
 const pkg = require('../package.json');
 const { parseCli, helpText } = require('./cli');
-const { classifyTarget, labelFor, HOSTLIKE_PATTERN, SCHEME_PATTERN } = require('./targets');
+const { classifyTarget, labelFor, isBlankUrl, BLANK_URL, HOSTLIKE_PATTERN, SCHEME_PATTERN } = require('./targets');
 const { resolveScripts, buildInjection } = require('./scripts');
 const { loadState, saveState } = require('./settings');
 const { imageTooLarge } = require('./images');
@@ -35,7 +35,6 @@ const EDGE_HEIGHT = 4;
 const EDGE_DWELL_MS = 300;
 
 const MIN_CONTENT_HEIGHT = 80;
-const BLANK_URL = 'about:blank';
 const APP_NAME = 'Mullion';
 
 // Favicons are refused above this size and re-encoded as PNG before the title
@@ -462,7 +461,16 @@ function createTab(url, { runScripts = false } = {}) {
       // The primary button only. Hiding the bar moves the page up by the height
       // of the row, which would drag the page out from under the context menu
       // the right button just opened.
-      if (input.button !== 'left' || !navigationVisible) return;
+      //
+      // This is the one dismissal the user did not ask for by name -- a click in
+      // the page is aimed at the page -- so it is the one that must not reach the
+      // pin whenever the click cannot actually take the bar down. Held up by a
+      // blank tab it would not go anywhere, and under a page in full screen the
+      // bar is not there to go: either way the click is about the page, and
+      // taking it as an answer about the bar would rewrite a standing choice the
+      // user never revisited. Escape carries the same full-screen guard for the
+      // same reason.
+      if (input.button !== 'left' || !navigationVisible || tab.htmlFullScreen || isBarForcedUp()) return;
       setNavigationVisible(false);
       return;
     }
@@ -472,13 +480,13 @@ function createTab(url, { runScripts = false } = {}) {
         clearEdgeDwell();
         return;
       }
-      if (edgeDwellTimer !== null || navigationVisible) return;
+      if (edgeDwellTimer !== null || isNavigationBarVisible()) return;
       edgeDwellTimer = setTimeout(() => {
         edgeDwellTimer = null;
         // A page in full screen has the screen; a bar over it would fight what
         // the user asked for.
         if (tab.id !== activeTabId || tab.htmlFullScreen) return;
-        if (!navigationVisible) setNavigationVisible(true, { transient: true });
+        if (!isNavigationBarVisible()) setNavigationVisible(true, { transient: true });
       }, EDGE_DWELL_MS);
       return;
     }
@@ -559,11 +567,17 @@ function createTab(url, { runScripts = false } = {}) {
 }
 
 function syncNavigationState(tab) {
+  // Leaving or reaching a blank page changes how tall the chrome is, and the
+  // renderer only hides rows -- it cannot resize the band it sits in. So this
+  // is the one navigation that has to go back through the layout instead of
+  // just pushing state, or the page keeps the gap the toolbar left behind.
+  const wasBlank = isBlankTab(tab);
   tab.url = tab.view.webContents.getURL();
   tab.canGoBack = tab.view.webContents.navigationHistory.canGoBack();
   tab.canGoForward = tab.view.webContents.navigationHistory.canGoForward();
   syncWindowTitle();
-  pushState();
+  if (tab.id === activeTabId && wasBlank !== isBlankTab(tab)) relayout();
+  else pushState();
 }
 
 // `session.fetch` follows `file:` and any registered custom protocol, so an
@@ -709,14 +723,44 @@ function closeFocused() {
   if (activeTabId) closeTab(activeTabId);
 }
 
-// The tab strip earns its space once there is a choice to make, so a single-tab
-// window stays completely bare. Both the layout and the renderer state read it.
+// A tab with no URL yet counts too: it has nothing to show for the same reason.
+function isBlankTab(tab) {
+  return Boolean(tab) && (!tab.url || isBlankUrl(tab.url));
+}
+
+// A blank tab shows nothing and offers nothing: without the bar there is no way
+// to leave it short of a keyboard shortcut. So on one the bar stops being the
+// user's choice and is simply up.
 //
-// In full screen it waits to be asked for, the way a browser's toolbar does,
-// rather than standing between the page and the top of the screen.
+// Window full screen is the exception, and it is the same one the rest of the
+// chrome makes: asking for full screen is asking for the screen. A blank tab is
+// not stranded there either -- Cmd+L and the top edge reach the bar in full
+// screen exactly as they do for a page.
+function isBarForcedUp() {
+  return !windowFullScreen && isBlankTab(activeTab());
+}
+
+// What the forcing does not do is throw the choice away. `navigationVisible` and
+// the pin go on recording what was asked for -- the collapse button and Escape
+// still take the bar down, it just does not go anywhere until the tab has a page
+// -- so a window that lands on `about:blank` does not quietly become one that
+// shows the bar for good.
+function isNavigationBarVisible() {
+  // A page in full screen has the screen, and `relayout()` gives the bands no
+  // height at all there. Saying so here as well keeps this the answer to "is the
+  // bar on the screen" rather than "would it be" -- the state push and the
+  // gesture guards both ask it that way.
+  const active = activeTab();
+  if (active && active.htmlFullScreen) return false;
+  return navigationVisible || isBarForcedUp();
+}
+
+// The tab strip is part of the chrome, not a thing of its own: it comes and
+// goes with the toolbar, so a window left alone shows nothing but the page
+// however many tabs are behind it. It stays a separate band in the state push
+// because the renderer hides the two rows independently.
 function isTabBarVisible() {
-  if (windowFullScreen && !navigationVisible) return false;
-  return navigationVisible || tabs.size > 1;
+  return isNavigationBarVisible();
 }
 
 function clearEdgeDwell() {
@@ -740,7 +784,7 @@ function relayout() {
   const pageFullScreen = Boolean(active && active.htmlFullScreen);
   const showTitleBar = Boolean(titleBarView) && !windowFullScreen && !pageFullScreen;
   const titleBarHeight = showTitleBar ? TITLE_BAR_HEIGHT : 0;
-  const bandHeight = pageFullScreen ? 0 : (navigationVisible ? TOOLBAR_HEIGHT : 0) + (isTabBarVisible() ? TAB_BAR_HEIGHT : 0);
+  const bandHeight = pageFullScreen ? 0 : (isNavigationBarVisible() ? TOOLBAR_HEIGHT : 0) + (isTabBarVisible() ? TAB_BAR_HEIGHT : 0);
   const topHeight = titleBarHeight + bandHeight;
   const contentHeight = Math.max(height - topHeight, MIN_CONTENT_HEIGHT);
 
@@ -781,7 +825,7 @@ function setShowUrl(value) {
 
 function buildState() {
   return {
-    navigationVisible,
+    navigationVisible: isNavigationBarVisible(),
     tabBarVisible: isTabBarVisible(),
     title: windowTitle(),
     titleBarInset: trafficLightInset(),
@@ -1128,7 +1172,7 @@ function restartTargets() {
 
 function persistState() {
   if (!mainWindow) return;
-  const urls = [...tabs.values()].map((tab) => tab.url).filter((url) => url && url !== BLANK_URL);
+  const urls = [...tabs.values()].map((tab) => tab.url).filter((url) => url && !isBlankUrl(url));
   // Called again from the window's close handler, by which time the tabs are
   // already gone; keeping the last non-empty list is what makes --restore work.
   if (urls.length > 0) persisted.lastUrls = urls;
@@ -1152,7 +1196,17 @@ ipcMain.handle('new-tab', () => {
 ipcMain.handle('select-tab', (_event, tabId) => selectTab(tabId));
 ipcMain.handle('close-tab', (_event, tabId) => closeTab(tabId));
 ipcMain.handle('hide-navigation', () => setNavigationVisible(false));
-ipcMain.handle('show-navigation', () => setNavigationVisible(true, { pinned: true }));
+// Toggled against what is on the screen, not against `navigationVisible`. On a
+// blank tab the two disagree: the bar can be up with nothing having asked for
+// it, and a click on a bar the user can see has to mean "put that away" or it
+// answers the opposite of what was asked. Hiding it there records the choice
+// without moving anything, which is what the collapse button does too, and the
+// bar goes when the tab has a page. Decided here rather than in the title bar so
+// that there is one copy of the rule and none of the state.
+ipcMain.handle('toggle-navigation', () => {
+  const next = !isNavigationBarVisible();
+  setNavigationVisible(next, { pinned: next });
+});
 ipcMain.handle('open-external', openActiveExternal);
 ipcMain.handle('get-qr', (event) => qrPayloads.get(event.sender.id) || null);
 ipcMain.handle('navigate', (_event, input) => {

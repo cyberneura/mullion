@@ -14,7 +14,7 @@ contextBridge.exposeInMainWorld('mullion', {
   closeTab: (tabId) => ipcRenderer.invoke('close-tab', tabId),
   openExternal: () => ipcRenderer.invoke('open-external'),
   hideNavigation: () => ipcRenderer.invoke('hide-navigation'),
-  showNavigation: () => ipcRenderer.invoke('show-navigation'),
+  toggleNavigation: () => ipcRenderer.invoke('toggle-navigation'),
   onState: (callback) => ipcRenderer.on('state', (_event, state) => callback(state)),
   onFocusUrl: (callback) => ipcRenderer.on('focus-url', () => callback())
 });
