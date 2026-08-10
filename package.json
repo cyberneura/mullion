@@ -15,7 +15,8 @@
     "check": "node --check scripts/brand-dev-bundle.js && node --check src/main.js && node --check src/cli.js && node --check src/targets.js && node --check src/scripts.js && node --check src/settings.js && node --check src/images.js && node --check src/qrcode.js && node --check src/navigation.js && node --check src/navigation-preload.js && node --check src/titlebar.js && node --check src/qr.js && node --check src/qr-preload.js && node --check bin/mullion.js",
     "test": "node --test",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "release": "bash scripts/release.sh"
   },
   "keywords": [
     "browser",
@@ -40,15 +41,30 @@
     "files": [
       "src/**/*",
       "bin/**/*",
+      "resources/tray.png",
+      "resources/tray@2x.png",
       "package.json"
     ],
     "directories": {
       "buildResources": "resources"
     },
+    "artifactName": "${name}-${version}-${arch}.${ext}",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "cyberneura",
+        "repo": "mullion",
+        "releaseType": "draft"
+      }
+    ],
     "mac": {
       "category": "public.app-category.utilities",
-      "identity": null,
       "icon": "resources/icon.png",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "resources/entitlements.mac.plist",
+      "entitlementsInherit": "resources/entitlements.mac.plist",
+      "notarize": true,
       "target": [
         {
           "target": "dmg",
