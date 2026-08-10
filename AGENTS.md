@@ -41,6 +41,15 @@ Electron app. Read `README.md` first for what the thing does.
 - Icons are Bootstrap Icons paths inlined as SVG in the markup. No webfont, no
   icon dependency, and no path data in the renderer scripts: a glyph the
   renderer has to build goes in a `<template>` and is cloned.
+- **`resources/tray.png` is measured in points, not pixels**, so its height is
+  the height the glyph gets in a 24pt menu bar. Sixteen is the number: at 32 it
+  overflows and macOS crops it back to the bar, which is why enlarging the
+  margin inside a 32px file changes nothing on screen — both versions render at
+  the bar's full height and tower over every neighbouring icon. `tray@2x.png` is
+  exactly double. Neither carries a margin of its own; the menu bar spaces its
+  own items, and any margin in the file only makes the glyph smaller than the
+  ones beside it. Check a change by measuring a screenshot of the bar against
+  its neighbours (they sit at 15–18px), not by looking at the file.
 
 ## Testing
 
