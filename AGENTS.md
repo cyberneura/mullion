@@ -78,6 +78,55 @@ run happened.
   `TRAFFIC_LIGHT_INSET` does not follow: it and `TRAFFIC_LIGHT_HEIGHT` are
   measured values, and the main process sends the inset to `titlebar.js` in the
   state push. Re-measure both if the buttons change size.
+- **The bar is not optional on `about:blank`.** `navigationVisible` is the
+  current state and `navigationPinned` the standing choice that outlives the
+  session; neither is touched by the rule. `isNavigationBarVisible()` is what
+  the layout and the state push read, and it answers whether the bar is on the
+  screen: `isBarForcedUp()` puts it up on a blank tab, which has nothing to show
+  and no way out of it, and either kind of full screen overrides that — window
+  full screen inside `isBarForcedUp()`, a page in full screen at the top of
+  `isNavigationBarVisible()`, both because asking for the screen is asking for
+  the screen. Nothing is refused, though: a dismissal on a blank tab records itself,
+  the bar simply does not move until the tab has a page. That matters because
+  `Cmd+T` pins the bar on the way to focusing the address field, so a refusal
+  would leave a new tab's pin with no way to undo it, all the way into
+  `settings.json`. The one exception is the click in the page, which is the only
+  dismissal the user did not ask for by name: it is aimed at the page, and the
+  guard on it (`isBarForcedUp()` and `htmlFullScreen` at the `mouseDown`) covers
+  both cases where the click cannot take the bar down — held up by a blank tab it
+  is on the screen and staying there, under a page in full screen it is gone
+  already.
+- **`isBarForcedUp()` is the one place the rule lives**, and `isBlankUrl()` in
+  `targets.js` (with tests) is the one place the blank test lives. Both the
+  visibility the layout reads and the guard that asks "is this dismissal about a
+  bar the user can see" go through them, so the two cannot drift apart.
+- **The title bar toggles against what is on the screen**, not against
+  `navigationVisible`, and it is `toggle-navigation` in the main process that
+  decides — one copy of the rule, and no mirrored state in the renderer. The two
+  values disagree in two places: on a blank tab, where a bar can be up that
+  nothing asked for, and under a page in full screen, where a bar that was asked
+  for is off the screen. Only the first is reachable by clicking, since the title
+  bar has no row in full screen, and there a click on a bar the user is looking
+  at has to put it away — otherwise it answers the opposite of what was asked and
+  writes a pin into `settings.json` that was never wanted. `Cmd+L` is what pins
+  from there.
+- **A URL change can resize the chrome**, which is why `syncNavigationState()`
+  calls `relayout()` when a tab crosses into or out of `about:blank`. The
+  renderer can only hide a row; the band it sits in is sized by the main
+  process, so a state push on its own leaves the page with a gap above it.
+- **The unpackaged app is named by renaming Electron's own bundle directory**
+  (`scripts/brand-dev-bundle.js`, run from `postinstall`), so in a dev checkout
+  it is `node_modules/electron/dist/Mullion.app`. The menu bar reads
+  `CFBundleName` / `CFBundleDisplayName` out of the plist, but the Dock tile
+  ignores those and follows the directory name — measured both ways round.
+  `node_modules/electron/path.txt` is rewritten with it, since that is how
+  `require('electron')` finds the binary. `app.setName()` reaches none of this.
+- **Do not rename the executable inside that bundle.** `app.isPackaged` is
+  derived from its name, and `main.js` reads that flag to decide how much of
+  `argv` belongs to Electron and whether to set the Dock icon itself. Renaming
+  the binary makes a development run think it is packaged, and the app path
+  arrives at the CLI parser as a target — every launch opens a dead `file://`
+  tab. It does nothing for the Dock name either; the directory is what counts.
 - **`src/qrcode.js` is checked two ways, and only one of them proves spec
   compliance.** The round-trip decoder in `test/` shows the encoder is
   self-consistent, which a mistake mirrored on both sides passes unnoticed.

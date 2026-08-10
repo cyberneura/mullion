@@ -6,15 +6,13 @@ const markEl = document.getElementById('mark');
 const faviconEl = document.getElementById('favicon');
 const labelEl = document.getElementById('label');
 
-let navigationVisible = false;
-
-titleButton.addEventListener('click', () => {
-  if (navigationVisible) window.mullion.hideNavigation();
-  else window.mullion.showNavigation();
-});
+// Which way the click goes is decided in the main process. The state push
+// carries whether the bar is *shown*, and on a blank tab that is true even when
+// the user never asked for it -- a renderer toggling on that value would always
+// pick "hide" and never manage to pin.
+titleButton.addEventListener('click', () => window.mullion.toggleNavigation());
 
 function render(state) {
-  navigationVisible = state.navigationVisible;
   // textContent, never innerHTML: the title comes from an untrusted page.
   labelEl.textContent = state.title || 'Mullion';
   insetEl.style.width = `${state.titleBarInset}px`;

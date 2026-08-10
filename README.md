@@ -88,7 +88,7 @@ overrides both: a pinned title stays pinned.
 
 The two kinds of full screen are treated differently. **View → Toggle Full
 Screen** (`Ctrl+Cmd+F`, `F11` elsewhere), which is how you get there on a
-frameless window, hides the title bar and lets the tab strip fall away — but
+frameless window, hides the title bar along with the rest of the chrome — but
 `Cmd/Ctrl+L` and the top edge still call the navigation bar back, the way a
 browser's toolbar behaves. When a *page* goes full screen, a video for
 instance, every band is hidden and stays hidden: the page asked for the screen.
@@ -100,21 +100,30 @@ second one.
 
 | Action | Result |
 |---|---|
-| Click the window title | show the bar and keep it |
+| Click the window title | show the bar and keep it, or put it away again |
 | Rest the pointer on the top 4px of the page for 300ms | show the bar for two seconds |
 | Click anywhere in the page | hide the bar |
 | `Cmd/Ctrl+L` | show the bar and focus the address field |
 | `Cmd/Ctrl+T` | new tab, with the address field focused |
 | `Esc` | hide the bar |
-| A second tab exists | the tab strip stays visible on its own |
+| The page is `about:blank` | the bar stays up, so a click in the page does nothing; `Esc` and the collapse button still count and take effect on the next page |
+
+That last row is the one thing window full screen does not honour: there a blank
+page gets the screen like any other, and the bar comes back by the same two
+routes as on any page.
+
+The tab strip comes and goes with the bar. However many tabs are open, a window
+left alone shows nothing but the page.
 
 `Cmd/Ctrl+R` reloads, `Cmd/Ctrl+W` closes a tab, `Cmd/Ctrl+[` and `Cmd/Ctrl+]`
 go back and forward. Everything except `Esc` is also in the application menu.
 
 Both pointer gestures stop at a frame boundary: an embedded player served from
 another origin swallows the click and the hover, because neither Electron nor a
-preload sees input inside an out-of-process iframe. `Cmd/Ctrl+L` always works,
-which matters most in full screen where the title bar is not there to click.
+preload sees input inside an out-of-process iframe. `Cmd/Ctrl+L` is not stopped
+by either, which matters most in window full screen where the title bar is not
+there to click. The one place it does nothing is under a page that has gone full
+screen itself, which has the screen until it gives it back.
 
 ### The page menu
 

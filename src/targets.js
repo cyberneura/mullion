@@ -15,6 +15,17 @@ const SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*:/i;
 // (mailto:, slack:, ...) belongs to the OS, not to us.
 const WEB_SCHEMES = new Set(['http:', 'https:', 'file:', 'about:', 'data:', 'chrome:', 'devtools:']);
 
+// The page a window with nothing to show sits on. The fragment and the query are
+// cut off before the comparison: `about:blank#x` is reachable -- the address bar
+// takes it and so does the command line -- and it is the same empty page, so an
+// exact match would let a two-character suffix walk past every rule that keys on
+// being blank.
+const BLANK_URL = 'about:blank';
+
+function isBlankUrl(url) {
+  return typeof url === 'string' && url.split(/[#?]/, 1)[0] === BLANK_URL;
+}
+
 const FILE_KINDS = {
   '.pdf': 'pdf',
   '.png': 'image',
@@ -141,4 +152,13 @@ function labelFor(target) {
   return 'Mullion';
 }
 
-module.exports = { classifyTarget, labelFor, fileKindFor, FILE_KINDS, HOSTLIKE_PATTERN, SCHEME_PATTERN };
+module.exports = {
+  classifyTarget,
+  labelFor,
+  fileKindFor,
+  isBlankUrl,
+  BLANK_URL,
+  FILE_KINDS,
+  HOSTLIKE_PATTERN,
+  SCHEME_PATTERN
+};
