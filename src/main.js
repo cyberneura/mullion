@@ -8,6 +8,7 @@ const { pathToFileURL } = require('node:url');
 
 const pkg = require('../package.json');
 const { parseCli, helpText } = require('./cli');
+const { createMenubarBlurController } = require('./menubar');
 const { classifyTarget, labelFor, isBlankUrl, BLANK_URL, HOSTLIKE_PATTERN, SCHEME_PATTERN } = require('./targets');
 const { resolveScripts, buildInjection } = require('./scripts');
 const { loadState, saveState } = require('./settings');
@@ -57,6 +58,7 @@ let navigationView = null;
 let titleBarView = null;
 let qrWindow = null;
 let tray = null;
+let menubarBlurController = null;
 let quitting = false;
 
 const tabs = new Map();
@@ -284,6 +286,8 @@ function createWindow() {
   openStartupTabs();
 
   mainWindow.on('resize', relayout);
+  menubarBlurController = cli.menubar ? createMenubarBlurController(() => mainWindow) : null;
+  if (menubarBlurController) mainWindow.on('blur', menubarBlurController.onBlur);
   // Full screen is the one time the title bar has nothing to offer: the window
   // buttons are gone, there is nothing to drag, and the point of the mode is
   // that the page gets the whole screen.
@@ -325,6 +329,7 @@ function createWindow() {
     // left but a code for a page that is gone.
     if (qrWindow && !qrWindow.isDestroyed()) qrWindow.destroy();
     mainWindow = null;
+    menubarBlurController = null;
     navigationView = null;
     titleBarView = null;
     for (const tab of tabs.values()) {
@@ -1122,19 +1127,32 @@ function createTray() {
   tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon);
   tray.setToolTip(cli.title || 'Mullion');
 
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: 'Close', click: () => { quitting = true; app.quit(); } },
-      { label: 'Reload', click: () => activeTab() && activeTab().view.webContents.reload() },
-      { label: 'Restart', click: restartTargets }
-    ])
-  );
+  const contextMenu = Menu.buildFromTemplate([
+    { label: 'Close', click: () => { quitting = true; app.quit(); } },
+    { label: 'Reload', click: () => activeTab() && activeTab().view.webContents.reload() },
+    { label: 'Restart', click: restartTargets }
+  ]);
+  if (process.platform === 'linux') tray.setContextMenu(contextMenu);
+
+  const preserveWindowForTrayInteraction = () => {
+    if (menubarBlurController) menubarBlurController.onTrayInteraction();
+  };
+  // macOS reports the primary tray click on mouse-up, after the window can
+  // already have blurred on mouse-down.
+  if (process.platform === 'darwin') tray.on('mouse-down', preserveWindowForTrayInteraction);
 
   tray.on('click', () => {
+    preserveWindowForTrayInteraction();
     if (!mainWindow) return;
     if (mainWindow.isVisible()) mainWindow.hide();
     else revealWindow();
   });
+  if (process.platform !== 'linux') {
+    tray.on('right-click', () => {
+      preserveWindowForTrayInteraction();
+      if (tray) tray.popUpContextMenu(contextMenu);
+    });
+  }
 }
 
 // Anchors the popover under the tray icon where the platform reports one, and

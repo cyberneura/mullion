@@ -209,7 +209,9 @@ mullion --menubar --width 420 --height 640 https://example.com
 ```
 
 The window becomes a popover anchored to the tray icon. Left-clicking the icon
-shows and hides it; right-clicking opens the menu:
+only shows or hides the window. Clicking elsewhere hides it, and right-clicking
+the icon opens the menu without showing the window. Linux desktop environments
+control the tray-menu gesture themselves.
 
 | Item | Result |
 |---|---|
