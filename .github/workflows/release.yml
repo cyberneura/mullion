@@ -250,11 +250,13 @@ jobs:
         with:
           persist-credentials: false
 
-      # `--target` を渡してタグを**このビルドの commit** に打つ。electron-builder は
-      # draft を作るときに target_commitish を送らないため、指定しないと GitHub は
-      # 「公開した瞬間の default branch の先端」でタグを作る。ビルド中に次の bump が
-      # main に載ると、v0.1.1 のタグが v0.1.2 の commit を指すことになる
-      # (concurrency が直列化するのは run であって push ではない)。
+      # タグは**このビルドの commit** に、公開の前に自分で打つ。放っておくと打たれる
+      # のは「公開した瞬間の default branch の先端」で、ビルド中に次の bump が main に
+      # 載れば v0.1.1 のタグが v0.1.2 の commit を指す (concurrency が直列化するのは
+      # run であって push ではない)。electron-builder は draft を作るときに
+      # target_commitish を送らず、`gh release edit --target` はタグが既にあると
+      # 無視されるうえ、`--draft=false` はその場で公開してしまうので、そこで気づいても
+      # もう取り消せない。先に打てば、間違ったタグで公開されること自体が起きない。
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -262,10 +264,27 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          gh release edit "v${VERSION}" --draft=false --latest --target "$SHA"
-          # `--target` は「タグがまだ無い」ときにしか効かない。効いたかどうかを
-          # 頼まずに確かめる。ここがズレていると、正しく署名された dmg が別の
-          # commit のタグで公開されることになる。
+          # タグは公開の前に、こちらから打つ。`--target` に任せると「タグがまだ無い」
+          # ときにしか効かず、効かなかったことに気づけるのは公開した後になる
+          # (`--draft=false` はその場で公開してしまうので、後段の照合は誤りを
+          # 見つけられても取り消せない)。先に打っておけば、間違ったタグで公開される
+          # ことはそもそも起こらない。
+          if out=$(gh api "repos/${REPO}/git/refs" -f ref="refs/tags/v${VERSION}" -f sha="$SHA" 2>&1); then
+            echo "Tagged v${VERSION} at ${SHA}"
+          else
+            if ! printf '%s' "$out" | grep -q "already exists"; then
+              echo "::error::Could not create tag v${VERSION}: ${out}"
+              exit 1
+            fi
+            # preflight の後に誰かが打ったタグ。指す先が同じなら続行してよい。
+            EXISTING=$(gh api "repos/${REPO}/git/ref/tags/v${VERSION}" -q .object.sha)
+            if [ "$EXISTING" != "$SHA" ]; then
+              echo "::error::Tag v${VERSION} already exists at ${EXISTING}, not at the built commit ${SHA}. Not publishing."
+              exit 1
+            fi
+            echo "Tag v${VERSION} already existed at ${SHA}"
+          fi
+          gh release edit "v${VERSION}" --draft=false --latest
           TAG_SHA=$(gh api "repos/${REPO}/git/ref/tags/v${VERSION}" -q .object.sha)
           if [ "$TAG_SHA" != "$SHA" ]; then
             echo "::error::Tag v${VERSION} points at ${TAG_SHA}, not at the built commit ${SHA}."

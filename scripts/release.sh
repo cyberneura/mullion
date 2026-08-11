@@ -164,6 +164,19 @@ if ! KNOWN_RUNS=$(gh run list --workflow=release.yml --branch main --limit 50 \
   exit 1
 fi
 
+# `workflow_dispatch` はブランチ名しか受け取らない (SHA を渡す口が無い) ので、dispatch は
+# 「その瞬間の main の先端」に対して起きる。ここまでの間に誰かが main を進めていれば、
+# 走るのは別の commit で、下のポーリングはそれを今回の run と認めない。
+# 完全には閉じられない窓なので、直前にもう一度だけ確かめて短くする。
+git fetch origin +main:refs/remotes/origin/main --quiet
+if [ "$(git rev-parse origin/main)" != "${RELEASE_SHA}" ]; then
+  echo "Error: origin/main moved to $(git rev-parse --short origin/main) after the bump was pushed." >&2
+  echo "  The dispatch would build that commit instead of v${VERSION}." >&2
+  echo "  Sort out main, then trigger and watch it by hand:" >&2
+  echo "    gh workflow run release.yml --ref main" >&2
+  exit 1
+fi
+
 if ! gh workflow run release.yml --ref main; then
   echo "Error: failed to trigger the workflow. v${VERSION} is already pushed to main." >&2
   echo "  Retry with: gh workflow run release.yml --ref main" >&2
