@@ -102,7 +102,7 @@ elif ! printf '%s' "${TAG_LOOKUP}" | grep -q "HTTP 404"; then
 fi
 
 # draft はタグを持たないので上のどちらにも掛からない。workflow 側の preflight と
-# 同じ理由でここでも見る (失敗した run の draft を electron-builder が再利用する)。
+# 同じ理由でここでも見る (失敗した run の中途半端なアセットを再利用しない)。
 if DRAFT_LOOKUP=$(gh release view "v${VERSION}" --json isDraft 2>&1); then
   echo "Error: a draft release v${VERSION} is left over." >&2
   echo "  Delete it (gh release delete v${VERSION}) or bump past it." >&2
