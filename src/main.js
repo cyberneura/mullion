@@ -1132,6 +1132,9 @@ function createTray() {
     { label: 'Reload', click: () => activeTab() && activeTab().view.webContents.reload() },
     { label: 'Restart', click: restartTargets }
   ]);
+  contextMenu.on('menu-will-close', () => {
+    if (menubarBlurController) menubarBlurController.onBlur();
+  });
   if (process.platform === 'linux') tray.setContextMenu(contextMenu);
 
   const preserveWindowForTrayInteraction = () => {
