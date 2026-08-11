@@ -88,9 +88,8 @@ jobs:
       # 経ずに手で起動されたということ。
       #
       # 404 だけを「存在しない」と読む。`gh release view` の非ゼロ終了をまとめて
-      # 「無い」と扱うと、認証切れや rate limit のときに素通りしてしまう。その先で
-      # electron-builder は「公開済み Release がある」ことに気づくとアップロードを
-      # 警告だけで飛ばすので、**新しい成果物を 1 つも上げないまま緑で終わる**。
+      # 「無い」と扱うと、認証切れや rate limit を version の空きと誤認し、時間のかかる
+      # 署名と公証を済ませた後の draft 作成まで失敗を先送りしてしまう。
       - name: Verify the release does not exist yet
         env:
           GH_TOKEN: ${{ github.token }}
