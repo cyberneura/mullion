@@ -88,6 +88,31 @@ elif ! printf '%s' "${RELEASE_LOOKUP}" | grep -q "HTTP 404"; then
   exit 1
 fi
 
+# タグ単体が残っている場合も、ここで止める。workflow 側にも同じ確認があるが、
+# あちらが弾くのは push の後なので、main に公開されない version の bump だけが
+# 取り残される — この preflight が防ぐつもりでいる状態そのものになる。
+if TAG_LOOKUP=$(gh api "repos/{owner}/{repo}/git/ref/tags/v${VERSION}" 2>&1); then
+  echo "Error: tag v${VERSION} already exists without a release." >&2
+  echo "  Delete it (git push origin :refs/tags/v${VERSION}) or bump past it." >&2
+  exit 1
+elif ! printf '%s' "${TAG_LOOKUP}" | grep -q "HTTP 404"; then
+  echo "Error: could not check whether tag v${VERSION} exists:" >&2
+  echo "  ${TAG_LOOKUP}" >&2
+  exit 1
+fi
+
+# draft はタグを持たないので上のどちらにも掛からない。workflow 側の preflight と
+# 同じ理由でここでも見る (失敗した run の draft を electron-builder が再利用する)。
+if DRAFT_LOOKUP=$(gh release view "v${VERSION}" --json isDraft 2>&1); then
+  echo "Error: a draft release v${VERSION} is left over." >&2
+  echo "  Delete it (gh release delete v${VERSION}) or bump past it." >&2
+  exit 1
+elif ! printf '%s' "${DRAFT_LOOKUP}" | grep -q "release not found"; then
+  echo "Error: could not check whether a draft v${VERSION} exists:" >&2
+  echo "  ${DRAFT_LOOKUP}" >&2
+  exit 1
+fi
+
 echo "Bumping version: ${CURRENT} -> ${VERSION} (${BUMP})"
 
 # package.json のトップレベル version だけを置換する (ファイル全体を再整形しない
