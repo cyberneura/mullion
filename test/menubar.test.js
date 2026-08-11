@@ -67,6 +67,19 @@ test('a tray interaction cancels a pending blur hide', () => {
   assert.equal(state.wasHidden(), false);
 });
 
+test('a long tray press keeps blur dismissal suspended until mouse-up', () => {
+  const state = setup();
+
+  state.controller.onTrayMouseDown();
+  state.controller.onBlur();
+  state.runPending();
+
+  assert.equal(state.wasHidden(), false);
+  state.controller.onTrayInteraction();
+  state.runPending();
+  assert.equal(state.wasHidden(), false);
+});
+
 test('a blur during the tray interaction grace period is reevaluated later', () => {
   const state = setup();
 

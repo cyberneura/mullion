@@ -9,6 +9,7 @@ function createMenubarBlurController(getWindow, options = {}) {
   const delay = options.delay ?? TRAY_INTERACTION_GRACE_MS;
   let pendingHide = null;
   let suppressBlurUntil = 0;
+  let trayPointerDown = false;
 
   function cancelPendingHide() {
     if (pendingHide === null) return;
@@ -19,20 +20,31 @@ function createMenubarBlurController(getWindow, options = {}) {
   function onBlur() {
     cancelPendingHide();
     const remainingSuppression = Math.max(0, suppressBlurUntil - now());
-    pendingHide = schedule(() => {
+    const hideIfUnfocused = () => {
       pendingHide = null;
+      if (trayPointerDown) {
+        pendingHide = schedule(hideIfUnfocused, delay);
+        return;
+      }
       const window = getWindow();
       if (!window || !window.isVisible() || window.isFocused()) return;
       window.hide();
-    }, Math.max(delay, remainingSuppression));
+    };
+    pendingHide = schedule(hideIfUnfocused, Math.max(delay, remainingSuppression));
+  }
+
+  function onTrayMouseDown() {
+    trayPointerDown = true;
+    cancelPendingHide();
   }
 
   function onTrayInteraction() {
+    trayPointerDown = false;
     suppressBlurUntil = now() + delay;
     cancelPendingHide();
   }
 
-  return { onBlur, onTrayInteraction };
+  return { onBlur, onTrayMouseDown, onTrayInteraction };
 }
 
 module.exports = { createMenubarBlurController };

@@ -1139,7 +1139,10 @@ function createTray() {
   };
   // macOS reports the primary tray click on mouse-up, after the window can
   // already have blurred on mouse-down.
-  if (process.platform === 'darwin') tray.on('mouse-down', preserveWindowForTrayInteraction);
+  if (process.platform === 'darwin') {
+    tray.on('mouse-down', () => menubarBlurController && menubarBlurController.onTrayMouseDown());
+    tray.on('mouse-up', preserveWindowForTrayInteraction);
+  }
 
   tray.on('click', () => {
     preserveWindowForTrayInteraction();
