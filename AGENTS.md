@@ -51,6 +51,55 @@ Electron app. Read `README.md` first for what the thing does.
   ones beside it. Check a change by measuring a screenshot of the bar against
   its neighbours (they sit at 15–18px), not by looking at the file.
 
+## Releasing
+
+`pnpm release [patch|minor|major]` is everything up to the published release —
+the Homebrew cask is a separate, manual step, described below. It bumps
+`package.json`, pushes the bump to `main`, triggers `.github/workflows/release.yml`
+and watches it. Nothing releases on push; the workflow is `workflow_dispatch`
+only.
+
+The workflow builds a signed and notarized universal dmg, attaches it to a
+**draft** release, verifies the result, and only then publishes. Points that are
+not obvious:
+
+- **Signing and notarization fail silently.** electron-builder without
+  `CSC_LINK` does not error — it produces an unsigned app, and an unsigned app
+  installed from a cask is quarantined and refused by Gatekeeper. The workflow
+  checks the secrets before building and inspects the artefact after
+  (`codesign`, `spctl`, `stapler validate`) rather than trusting a green build.
+- **The secrets live on this repository**, not on the organisation:
+  `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`,
+  `APPLE_PASSWORD`, `APPLE_TEAM_ID`. The names match the other Cyberneura
+  repositories so the values can be copied across, but electron-builder reads
+  different ones, so the workflow maps them (`CSC_LINK`,
+  `APPLE_APP_SPECIFIC_PASSWORD`). Unlike the Tauri repositories there is no
+  manual `security create-keychain` step — electron-builder imports the
+  certificate itself.
+- **The Homebrew cask is a separate repository** (`cyberneura/homebrew-tap`,
+  `Casks/mullion.rb`) and its `version` and `sha256` are hand-written. Nothing
+  fails if you forget: `brew install --cask` simply keeps installing the old
+  release. The workflow prints the two lines to paste into its run summary.
+- `build.artifactName` fixes the dmg's file name. The cask's `url` is built from
+  it, so changing it breaks installs for every published version.
+
+## Packaging
+
+- **`build.files` lists the runtime assets one by one, and `resources/` is not
+  a glob.** Only `tray.png` and `tray@2x.png` go in, because they are the only
+  files the app reads at run time; `icon.png` is a build input and the dev-only
+  dock icon. An asset that a packaged build needs and that is not listed here
+  does not fail loudly — `nativeImage.createFromPath()` returns an empty image
+  and the tray icon is simply invisible. Check with
+  `npx asar list dist/mac-*/Mullion.app/Contents/Resources/app.asar`.
+- **`pnpm pack` is not `pnpm run pack`.** pnpm has a built-in `pack` that wins
+  over the script of the same name, so `pnpm pack` writes an npm tarball and
+  never runs electron-builder. Use `pnpm run pack`.
+- A local build is unsigned unless the machine has the Developer ID certificate
+  (`CSC_IDENTITY_AUTO_DISCOVERY=false` skips signing cleanly instead of failing),
+  so it is good for checking what went into the bundle and little else.
+  Gatekeeper behaviour can only be judged on the notarized artefact from CI.
+
 ## Testing
 
 `src/cli.js`, `src/targets.js`, `src/scripts.js`, `src/qrcode.js`, and
@@ -62,7 +111,10 @@ pnpm test     # node --test
 pnpm check    # node --check on every source file
 ```
 
-There is no CI. `pnpm test` and `pnpm check` are the gate.
+Nothing runs on push. The only workflow is the manual release, and it runs both
+of these before it builds, so `pnpm test` and `pnpm check` are still the gate —
+they are just also the last thing standing between a mistake and a signed
+artefact on the internet.
 
 The app itself cannot be launched headlessly in the agent environment, and
 macOS packaging cannot be verified on Linux — say so instead of claiming a

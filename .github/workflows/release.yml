@@ -1,0 +1,293 @@
+name: Release
+
+# 手動実行 (workflow_dispatch) のみ。push では自動ビルドしない。
+# ローカルからは `pnpm release` で起動する。
+on:
+  workflow_dispatch:
+
+# GitHub Release の作成とアセットアップロードに contents: write が必要。
+permissions:
+  contents: write
+
+# 同時に走らないよう直列化する。1 回の dispatch が 1 つの version に対応するため、
+# キャンセルされた run の version は (bump コミットは main に載ったまま) 永久に公開
+# されない状態になる。走行中を守る cancel-in-progress: false だけでは不十分で、
+# 既定の queue: single は pending を 1 件しか保持せず、新しい dispatch が既存 pending を
+# 置き換えてしまう。queue: max は pending を 100 件まで積む。
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  # macOS 専用アプリなので macOS のみビルドする。Intel / Apple Silicon 両対応の
+  # universal dmg を配布する (package.json の build.mac.target で指定済み)。
+  build:
+    runs-on: macos-latest
+    # universal ビルドは両アーキの Electron を落としてから結合するうえ、Apple の
+    # 公証サービスの待ち時間が読めない。ハングした時の上限であって通常はここまで
+    # 使わない。
+    timeout-minutes: 60
+
+    steps:
+      # persist-credentials: false — checkout が write 権限の GITHUB_TOKEN を
+      # .git/config に残さないようにする。以降のステップ (pnpm install の
+      # install script や third-party action) がそれを拾えないようにするため。
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      # `version` は渡さない。この action は package.json の `packageManager`
+      # (pnpm@10.26.0) と `version` の**文字列が一致しない**と
+      # "Multiple versions of pnpm specified" で落ちるので、"10" と書くと
+      # 依存関係のインストールまで到達しない。他のリポジトリ (flashcap 等) が
+      # `version: 10` で通っているのは packageManager フィールドが無いから。
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check
+        run: pnpm check && pnpm test
+
+      # Secret が欠けていても electron-builder は「失敗」ではなく**黙って未署名の
+      # 成果物を作る** (CSC_LINK が無ければ署名を飛ばし、公証の env が無ければ
+      # 公証も行わない)。未署名・未公証の dmg は cask から入れても Gatekeeper に
+      # 起動を止められるので、ここで先に落とす。
+      - name: Verify signing secrets are present
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          missing=()
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD \
+            APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!name}" ]; then
+              missing+=("$name")
+            fi
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing repository secrets: ${missing[*]}. Signing and notarization would be silently skipped."
+            exit 1
+          fi
+          echo "All signing and notarization secrets are present."
+
+      # 公開済みバージョンに上書きしてしまう事故を防ぐ。`pnpm release` は毎回
+      # version を上げてから dispatch するので、ここで衝突していれば bump を
+      # 経ずに手で起動されたということ。
+      #
+      # 404 だけを「存在しない」と読む。`gh release view` の非ゼロ終了をまとめて
+      # 「無い」と扱うと、認証切れや rate limit のときに素通りしてしまう。その先で
+      # electron-builder は「公開済み Release がある」ことに気づくとアップロードを
+      # 警告だけで飛ばすので、**新しい成果物を 1 つも上げないまま緑で終わる**。
+      - name: Verify the release does not exist yet
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if out=$(gh api "repos/${REPO}/releases/tags/v${VERSION}" 2>&1); then
+            echo "::error::Release v${VERSION} already exists. Bump the version (pnpm release) instead of re-running this workflow."
+            exit 1
+          fi
+          if ! printf '%s' "$out" | grep -q "HTTP 404"; then
+            echo "::error::Could not determine whether v${VERSION} exists: ${out}"
+            exit 1
+          fi
+          # タグ単体が先に存在していないことも見る。GitHub は **タグが既にあると
+          # target_commitish を黙って無視する**ので、publish の `--target` だけでは
+          # 「古いタグが指す別の commit のまま公開される」のを防げない。失敗した run が
+          # 残したタグや手で打ったタグがここに引っかかる。
+          if tag=$(gh api "repos/${REPO}/git/ref/tags/v${VERSION}" 2>&1); then
+            echo "::error::Tag v${VERSION} already exists without a release. Delete it or bump the version."
+            exit 1
+          fi
+          if ! printf '%s' "$tag" | grep -q "HTTP 404"; then
+            echo "::error::Could not determine whether tag v${VERSION} exists: ${tag}"
+            exit 1
+          fi
+          # draft はタグを持たないので、上の 2 つのどちらにも引っかからない。失敗した
+          # run が残した draft を electron-builder はそのまま再利用するので、そこに
+          # 前回の中途半端なアセットが残っていると、今回ビルドしていないものを一緒に
+          # 公開してしまう (同名なら上書きされるが、名前が変わっていれば残る)。
+          if draft=$(gh release view "v${VERSION}" --json isDraft 2>&1); then
+            echo "::error::A draft release v${VERSION} is left over. Delete it (gh release delete v${VERSION}) or bump the version."
+            exit 1
+          fi
+          if ! printf '%s' "$draft" | grep -q "release not found"; then
+            echo "::error::Could not determine whether a draft v${VERSION} exists: ${draft}"
+            exit 1
+          fi
+          echo "v${VERSION} is free."
+
+      # electron-builder は証明書を自分で keychain へインポートする。Tauri と違い
+      # `security create-keychain` を手で書く必要はなく、CSC_LINK に base64 の p12 を
+      # 渡すだけでよい。secrets 名は他リポジトリ (Tauri 側) と揃えてあるので、
+      # ここで electron-builder が読む名前に写す。
+      #
+      # 公証は APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID を見る
+      # (package.json の mac.notarize: true)。APPLE_PASSWORD は app 用パスワード
+      # なので、そのまま APPLE_APP_SPECIFIC_PASSWORD に渡す。
+      #
+      # ビルドが途中で失敗しても不完全な Release が公開されないよう draft で作り、
+      # 成功後に publish ジョブで公開する。
+      - name: Build, sign, notarize and upload (draft)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CSC_LINK: ${{ secrets.APPLE_CERTIFICATE }}
+          CSC_KEY_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: pnpm dist --publish always
+
+      # 署名も公証も、失敗ではなく「静かに省略」で終わることがある。成果物を
+      # 直接検査して、そうなっていないことを確かめる。spctl は Gatekeeper が
+      # 実際に下す判断そのものなので、cask から入れた利用者と同じ経路を見ている。
+      - name: Verify the signature and the notarization ticket
+        run: |
+          APP="dist/mac-universal/Mullion.app"
+          if [ ! -d "$APP" ]; then
+            APP=$(find dist -maxdepth 2 -name "Mullion.app" -type d | head -1)
+          fi
+          if [ -z "$APP" ] || [ ! -d "$APP" ]; then
+            echo "::error::Built app not found under dist/."
+            exit 1
+          fi
+          echo "Verifying $APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign --display --verbose=4 "$APP" 2>&1 | grep -q "Authority=Developer ID Application" || {
+            echo "::error::The app is not signed with a Developer ID Application certificate."
+            exit 1
+          }
+          # `--verbose` を付けないと spctl は成功時に**何も出力しない** (exit 0 のみ)
+          # ので、出力を grep する判定は verbose の出力に対して行う。判断そのものは
+          # 終了コードで、内訳は source 行で見る。
+          #
+          # 通っただけでは足りない。ad-hoc 署名でも別の経路で accepted になることが
+          # あり、cask から入れた利用者に効くのは公証まで済んで staple された状態
+          # ("source=Notarized Developer ID") だけ。ここが "Unnotarized Developer ID"
+          # のまま公開すると、ダウンロードしたアプリは quarantine で起動できない。
+          ASSESS=$(spctl --assess --type execute --verbose=4 "$APP" 2>&1) || {
+            echo "::error::Gatekeeper rejected the app: ${ASSESS}"
+            exit 1
+          }
+          echo "$ASSESS"
+          printf '%s' "$ASSESS" | grep -q "source=Notarized Developer ID" || {
+            echo "::error::Accepted, but not as a notarized Developer ID app: ${ASSESS}"
+            exit 1
+          }
+          xcrun stapler validate "$APP"
+
+      # 署名を確かめたのはローカルの成果物で、利用者が受け取るのは Release の
+      # アセット。その2つが同じものだと確かめるまで、検証は終わっていない。
+      # electron-builder は Release の状態が食い違うとアップロードを警告だけで
+      # 飛ばすので、ここが無いと「署名済みのアプリをビルドしたが、Release には
+      # 何も上がっていない」まま緑になりうる。
+      #
+      # ファイル名も突き合わせる。cask の url は artifactName が決めた名前を
+      # 直書きしているので、名前が変われば公開済みの全バージョンの
+      # `brew install` が壊れる。
+      - name: Verify the release asset matches what was just built
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          NAME="mullion-${VERSION}-universal.dmg"
+          if [ ! -f "dist/${NAME}" ]; then
+            echo "::error::Expected dist/${NAME}. Did build.artifactName change? The cask url depends on this name."
+            ls -la dist || true
+            exit 1
+          fi
+          IS_DRAFT=$(gh release view "v${VERSION}" --json isDraft -q .isDraft)
+          if [ "$IS_DRAFT" != "true" ]; then
+            echo "::error::v${VERSION} is not a draft. Refusing to continue."
+            exit 1
+          fi
+          gh release download "v${VERSION}" --pattern "$NAME" --dir "$RUNNER_TEMP/verify" --clobber
+          LOCAL=$(shasum -a 256 "dist/${NAME}" | cut -d' ' -f1)
+          REMOTE=$(shasum -a 256 "$RUNNER_TEMP/verify/${NAME}" | cut -d' ' -f1)
+          if [ "$LOCAL" != "$REMOTE" ]; then
+            echo "::error::The uploaded asset does not match the local build (${LOCAL} != ${REMOTE})."
+            exit 1
+          fi
+          echo "Release asset verified: ${NAME} ${LOCAL}"
+          # cask は version と sha256 を直書きしているので、リリースのたびに
+          # cyberneura/homebrew-tap を手で更新する必要がある。忘れても何も
+          # 失敗せず、`brew install --cask` が古い版を配り続けるだけなので、
+          # ここで貼り付ける形にして出しておく。
+          {
+            echo "## Update the Homebrew cask"
+            echo
+            echo 'Edit `Casks/mullion.rb` in `cyberneura/homebrew-tap`:'
+            echo
+            echo '```ruby'
+            echo "  version \"${VERSION}\""
+            echo "  sha256 \"${LOCAL}\""
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ビルド・署名・公証・アップロードがすべて成功した時のみ draft を公開する。
+  # 失敗した場合は draft のまま残る (不完全な Release は公開されない)。
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      # タグは**このビルドの commit** に、公開の前に自分で打つ。放っておくと打たれる
+      # のは「公開した瞬間の default branch の先端」で、ビルド中に次の bump が main に
+      # 載れば v0.1.1 のタグが v0.1.2 の commit を指す (concurrency が直列化するのは
+      # run であって push ではない)。electron-builder は draft を作るときに
+      # target_commitish を送らず、`gh release edit --target` はタグが既にあると
+      # 無視されるうえ、`--draft=false` はその場で公開してしまうので、そこで気づいても
+      # もう取り消せない。先に打てば、間違ったタグで公開されること自体が起きない。
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          # タグは公開の前に、こちらから打つ。`--target` に任せると「タグがまだ無い」
+          # ときにしか効かず、効かなかったことに気づけるのは公開した後になる
+          # (`--draft=false` はその場で公開してしまうので、後段の照合は誤りを
+          # 見つけられても取り消せない)。先に打っておけば、間違ったタグで公開される
+          # ことはそもそも起こらない。
+          if out=$(gh api "repos/${REPO}/git/refs" -f ref="refs/tags/v${VERSION}" -f sha="$SHA" 2>&1); then
+            echo "Tagged v${VERSION} at ${SHA}"
+          else
+            if ! printf '%s' "$out" | grep -q "already exists"; then
+              echo "::error::Could not create tag v${VERSION}: ${out}"
+              exit 1
+            fi
+            # preflight の後に誰かが打ったタグ。指す先が同じなら続行してよい。
+            EXISTING=$(gh api "repos/${REPO}/git/ref/tags/v${VERSION}" -q .object.sha)
+            if [ "$EXISTING" != "$SHA" ]; then
+              echo "::error::Tag v${VERSION} already exists at ${EXISTING}, not at the built commit ${SHA}. Not publishing."
+              exit 1
+            fi
+            echo "Tag v${VERSION} already existed at ${SHA}"
+          fi
+          gh release edit "v${VERSION}" --draft=false --latest
+          TAG_SHA=$(gh api "repos/${REPO}/git/ref/tags/v${VERSION}" -q .object.sha)
+          if [ "$TAG_SHA" != "$SHA" ]; then
+            echo "::error::Tag v${VERSION} points at ${TAG_SHA}, not at the built commit ${SHA}."
+            exit 1
+          fi
+          echo "Published: $(gh release view "v${VERSION}" --json url -q .url) (tag at ${TAG_SHA})"

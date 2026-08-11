@@ -13,9 +13,20 @@ into panes — the only part of a window you are meant not to notice.
 ## Install
 
 ```shell
-pnpm install
-pnpm start -- https://example.com
+brew install --cask cyberneura/tap/mullion
 ```
+
+Or from a checkout:
+
+```shell
+pnpm install
+pnpm start https://example.com
+```
+
+Arguments after `pnpm start` reach the app as they are. Do not put `--` in
+front of them: pnpm passes it through, and Mullion reads `--` as "everything
+after this is a file name", so `pnpm start -- --menubar` tries to open a file
+called `--menubar`.
 
 To get a `mullion` command:
 
@@ -246,8 +257,20 @@ src/navigation.*         the navigation bar renderer
 src/titlebar.*           the title bar renderer
 src/qr.*                 the QR code window renderer
 src/settings.js          window bounds and preferences in userData
-scripts/                 development-only helpers (macOS bundle naming)
+scripts/                 macOS bundle naming for development, and the release
 ```
+
+## Releasing
+
+```shell
+pnpm release           # patch. `minor` and `major` also work
+```
+
+It bumps the version, pushes it to `main`, starts the release workflow and
+watches it. The workflow builds a signed and notarized universal dmg and
+attaches it to a GitHub release. The Homebrew cask in
+[cyberneura/homebrew-tap](https://github.com/cyberneura/homebrew-tap) carries the
+version and checksum by hand; the workflow prints both in its run summary.
 
 ## License
 
