@@ -68,6 +68,11 @@ not obvious:
   installed from a cask is quarantined and refused by Gatekeeper. The workflow
   checks the secrets before building and inspects the artefact after
   (`codesign`, `spctl`, `stapler validate`) rather than trusting a green build.
+- **electron-builder never publishes the Release.** `--publish never` is
+  intentional: its DMG and blockmap publishers run independently, and when no
+  Release exists they can race into two drafts with the same tag. The workflow
+  creates one draft with `gh`, uploads only the DMG, downloads it and compares
+  its SHA-256. Do not restore `build.publish` or use `--publish always`.
 - **The secrets live on this repository**, not on the organisation:
   `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`,
   `APPLE_PASSWORD`, `APPLE_TEAM_ID`. The names match the other Cyberneura
