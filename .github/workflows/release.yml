@@ -106,7 +106,7 @@ jobs:
             exit 1
           fi
           # タグ単体が先に存在していないことも見る。GitHub は **タグが既にあると
-          # target_commitish を黙って無視する**ので、publish の `--target` だけでは
+          # target_commitish を黙って無視する**ので、Release 側で target を指定しても
           # 「古いタグが指す別の commit のまま公開される」のを防げない。失敗した run が
           # 残したタグや手で打ったタグがここに引っかかる。
           if tag=$(gh api "repos/${REPO}/git/ref/tags/v${VERSION}" 2>&1); then
@@ -118,9 +118,8 @@ jobs:
             exit 1
           fi
           # draft はタグを持たないので、上の 2 つのどちらにも引っかからない。失敗した
-          # run が残した draft を electron-builder はそのまま再利用するので、そこに
-          # 前回の中途半端なアセットが残っていると、今回ビルドしていないものを一緒に
-          # 公開してしまう (同名なら上書きされるが、名前が変わっていれば残る)。
+          # run が残した draft を再利用すると、前回の中途半端なアセットを今回の成果物と
+          # 一緒に公開しかねない。この workflow は draft を再利用せず、毎回 1 つだけ作る。
           if draft=$(gh release view "v${VERSION}" --json isDraft 2>&1); then
             echo "::error::A draft release v${VERSION} is left over. Delete it (gh release delete v${VERSION}) or bump the version."
             exit 1
@@ -140,17 +139,17 @@ jobs:
       # (package.json の mac.notarize: true)。APPLE_PASSWORD は app 用パスワード
       # なので、そのまま APPLE_APP_SPECIFIC_PASSWORD に渡す。
       #
-      # ビルドが途中で失敗しても不完全な Release が公開されないよう draft で作り、
-      # 成功後に publish ジョブで公開する。
-      - name: Build, sign, notarize and upload (draft)
+      # electron-builder の GitHub publisher は DMG と blockmap を並列処理し、Release が
+      # 無い状態では両方が別々の draft を作る競合がある。ここでは build だけを行い、
+      # 検証後に gh CLI で draft を 1 つ作って DMG だけをアップロードする。
+      - name: Build, sign and notarize
         env:
-          GH_TOKEN: ${{ github.token }}
           CSC_LINK: ${{ secrets.APPLE_CERTIFICATE }}
           CSC_KEY_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: pnpm dist --publish always
+        run: pnpm dist --publish never
 
       # 署名も公証も、失敗ではなく「静かに省略」で終わることがある。成果物を
       # 直接検査して、そうなっていないことを確かめる。spctl は Gatekeeper が
@@ -192,14 +191,14 @@ jobs:
 
       # 署名を確かめたのはローカルの成果物で、利用者が受け取るのは Release の
       # アセット。その2つが同じものだと確かめるまで、検証は終わっていない。
-      # electron-builder は Release の状態が食い違うとアップロードを警告だけで
-      # 飛ばすので、ここが無いと「署名済みのアプリをビルドしたが、Release には
-      # 何も上がっていない」まま緑になりうる。
+      # `gh release upload` の成功だけでなく、同じ名前のアセットを GitHub から
+      # ダウンロードして hash を比較し、利用者が受け取る DMG がこの build の成果物
+      # そのものだと確認する。
       #
       # ファイル名も突き合わせる。cask の url は artifactName が決めた名前を
       # 直書きしているので、名前が変われば公開済みの全バージョンの
       # `brew install` が壊れる。
-      - name: Verify the release asset matches what was just built
+      - name: Upload and verify the release asset
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -210,11 +209,13 @@ jobs:
             ls -la dist || true
             exit 1
           fi
+          gh release create "v${VERSION}" --draft --title "${VERSION}"
           IS_DRAFT=$(gh release view "v${VERSION}" --json isDraft -q .isDraft)
           if [ "$IS_DRAFT" != "true" ]; then
             echo "::error::v${VERSION} is not a draft. Refusing to continue."
             exit 1
           fi
+          gh release upload "v${VERSION}" "dist/${NAME}" --clobber
           gh release download "v${VERSION}" --pattern "$NAME" --dir "$RUNNER_TEMP/verify" --clobber
           LOCAL=$(shasum -a 256 "dist/${NAME}" | cut -d' ' -f1)
           REMOTE=$(shasum -a 256 "$RUNNER_TEMP/verify/${NAME}" | cut -d' ' -f1)
@@ -253,10 +254,10 @@ jobs:
       # タグは**このビルドの commit** に、公開の前に自分で打つ。放っておくと打たれる
       # のは「公開した瞬間の default branch の先端」で、ビルド中に次の bump が main に
       # 載れば v0.1.1 のタグが v0.1.2 の commit を指す (concurrency が直列化するのは
-      # run であって push ではない)。electron-builder は draft を作るときに
-      # target_commitish を送らず、`gh release edit --target` はタグが既にあると
-      # 無視されるうえ、`--draft=false` はその場で公開してしまうので、そこで気づいても
-      # もう取り消せない。先に打てば、間違ったタグで公開されること自体が起きない。
+      # run であって push ではない)。draft の作成時には tag ref がまだ無く、
+      # `gh release edit --target` はタグが既にあると無視されるうえ、`--draft=false` は
+      # その場で公開してしまうので、そこで気づいてももう取り消せない。先に打てば、
+      # 間違ったタグで公開されること自体が起きない。
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}

@@ -49,14 +49,6 @@
       "buildResources": "resources"
     },
     "artifactName": "${name}-${version}-${arch}.${ext}",
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "cyberneura",
-        "repo": "mullion",
-        "releaseType": "draft"
-      }
-    ],
     "mac": {
       "category": "public.app-category.utilities",
       "icon": "resources/icon.png",
