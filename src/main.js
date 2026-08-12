@@ -160,7 +160,12 @@ function start() {
     // A menu bar app has no windows most of the time; quitting on the last one
     // closing would make the tray icon disappear on the first Cmd+W.
     if (cli.menubar) return;
-    if (process.platform !== 'darwin') app.quit();
+    // In window mode the window *is* the app: it holds the session the command
+    // line asked for. The macOS convention of staying alive with no window does
+    // not apply — there would be nothing to come back to, and the leftover
+    // process still holds a menu bar and an app-switcher slot. So quit on every
+    // platform.
+    app.quit();
   });
 
   app.on('activate', () => {

@@ -45,6 +45,11 @@ A target is a URL (`https://example.com`, or just `example.com`), a local file
 path, or `-` to read HTML from standard input. Several targets open as several
 tabs.
 
+Closing the window ends the session on every platform, macOS included: the
+window is the app, and one left running with nothing in it would only hold on
+to a menu bar and a slot in the app switcher. Menu bar mode is the exception —
+see below.
+
 | Option | Meaning |
 |---|---|
 | `--width <px>` / `--height <px>` | window size (default 1280×720) |
