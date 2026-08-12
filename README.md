@@ -16,6 +16,26 @@ into panes — the only part of a window you are meant not to notice.
 brew install --cask cyberneura/tap/mullion
 ```
 
+The cask installs `Mullion.app` and nothing on your `PATH`, so options are
+passed through `open --args`:
+
+```shell
+open -a Mullion --args "https://example.com" --menubar --width 200 --height 300
+```
+
+Everything after `--args` is handed to Mullion as its command line. Two things
+to know about launching this way:
+
+- **The options only apply to a launch.** If Mullion is already running, `open`
+  just brings it forward — it starts no new process, so the arguments go
+  nowhere. Use `open -n` to start a second one, and add `--new-window` if you
+  want it to be a window of its own rather than handing its targets to the
+  instance already running:
+  `open -n -a Mullion --args --new-window https://example.com`.
+- **Use absolute paths for local files.** An app started by `open` does not
+  inherit the working directory of the shell you typed in, so a relative path
+  has nothing sensible to resolve against.
+
 Or from a checkout:
 
 ```shell
