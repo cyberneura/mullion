@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# scripts/make-icns.sh が macOS で生成する。ソースは resources/icon.png
+resources/icon.icns
 out/
 *.log
 .DS_Store
