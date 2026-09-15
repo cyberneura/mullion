@@ -13,7 +13,7 @@ set -euo pipefail
 : "${GH_REPO:?GH_REPO is required}"
 : "${VERSION:?VERSION is required}"
 
-# 新旧比較を X.Y.Z 同士の sort -V に頼るので、それ以外の形は判定しない。
+# 新旧比較は X.Y.Z を 1 桁ずつ数値で比べる (下の version_older) ので、それ以外の形は判定しない。
 semver='^[0-9]+\.[0-9]+\.[0-9]+$'
 if ! [[ "$VERSION" =~ $semver ]]; then
   echo "::error::version is not X.Y.Z: '${VERSION}'" >&2
@@ -81,7 +81,21 @@ if ! [[ "$latest" =~ $semver ]]; then
   exit 1
 fi
 
-if [ "$(printf '%s\n%s\n' "$latest" "$VERSION" | sort -V | tail -n 1)" != "$VERSION" ]; then
+# sort -V は使わない。このスクリプトは release.sh から macOS のローカルでも呼ばれ、
+# パイプの中で sort が失敗すると空文字との比較になって「古い」と誤判定する。
+# X.Y.Z は上で検証済みなので、数値として 1 桁ずつ比べれば足りる。
+version_older() {
+  local IFS=.
+  local -a a=($1) b=($2)
+  local i
+  for i in 0 1 2; do
+    if (( 10#${a[i]} < 10#${b[i]} )); then return 0; fi
+    if (( 10#${a[i]} > 10#${b[i]} )); then return 1; fi
+  done
+  return 1
+}
+
+if version_older "$VERSION" "$latest"; then
   echo "::warning::v${VERSION} is older than the latest release v${latest}; not releasing it." >&2
   echo false
   exit 0
