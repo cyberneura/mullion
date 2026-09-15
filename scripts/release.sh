@@ -113,6 +113,22 @@ elif ! printf '%s' "${DRAFT_LOOKUP}" | grep -q "release not found"; then
   exit 1
 fi
 
+# 公開中の最新より古い version も、ここで止める。package.json が revert で巻き戻って
+# いると、上の 3 つを全部通るのに workflow の plan は「最新より古い」で何もせず、
+# 公開されない bump だけが main に残る。判定は workflow と同じスクリプトで行う。
+if ! REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner); then
+  echo "Error: could not tell which repository this is." >&2
+  exit 1
+fi
+if ! RELEASE_DECISION=$(GH_REPO="${REPO}" VERSION="${VERSION}" bash scripts/release-decide.sh); then
+  echo "Error: could not decide whether v${VERSION} can be released (see above)." >&2
+  exit 1
+fi
+if [ "${RELEASE_DECISION}" != "true" ]; then
+  echo "Error: v${VERSION} would not be released (see above). Bump package.json past the latest release first." >&2
+  exit 1
+fi
+
 echo "Bumping version: ${CURRENT} -> ${VERSION} (${BUMP})"
 
 # package.json のトップレベル version だけを置換する (ファイル全体を再整形しない
