@@ -53,15 +53,33 @@ Electron app. Read `README.md` first for what the thing does.
 
 ## Releasing
 
-`pnpm release [patch|minor|major]` is everything up to the published release —
-the Homebrew cask is a separate, manual step, described below. It bumps
-`package.json`, pushes the bump to `main`, triggers `.github/workflows/release.yml`
-and watches it. Nothing releases on push; the workflow is `workflow_dispatch`
-only.
+A release is decided by the version in `package.json` on `main`: a push to
+`main` releases that version if it is not published yet and is newer than the
+latest release, and does nothing otherwise. Bumping the version inside a pull
+request and merging it releases too. `pnpm release [patch|minor|major]` bumps
+`package.json`, pushes the bump to `main`, watches the run that push started and
+checks that the release really was published. `workflow_dispatch` is kept for
+re-running a version whose run failed for a reason since fixed; it goes through
+the same check, so it cannot publish anything twice.
 
-The workflow builds a signed and notarized universal dmg, attaches it to a
-**draft** release, verifies the result, and only then publishes. Points that are
-not obvious:
+`.github/workflows/release.yml` runs `plan` (is this version still to be
+released?), `test` (`pnpm check` and `pnpm test`, also the only job on a pull
+request), `build` (a signed and notarized universal dmg attached to a **draft**
+release, then verified) and `publish`. Points that are not obvious:
+
+- **What to release is a question about state, not about the diff.**
+  `scripts/release-decide.sh` asks the releases API whether `v<version>` is
+  published (a draft counts as not published) and whether it is newer than the
+  latest release, so a revert of a bump, or pending runs taken in a different
+  order than they were pushed, cannot roll the latest release (and the cask)
+  back. `publish` asks again right before publishing, because "Re-run failed
+  jobs" reuses the answer of a `plan` that already succeeded.
+- **The tag is created by `publish`, at the built commit, before publishing.**
+  `gh release edit --target` is ignored once a tag exists, and `--draft=false`
+  publishes on the spot, so the tag is pinned first. `build` refuses to start
+  over a leftover tag or draft for the same version rather than reusing it, so a
+  run that failed after creating either needs that leftover deleted before a
+  re-run.
 
 - **Signing and notarization fail silently.** electron-builder without
   `CSC_LINK` does not error — it produces an unsigned app, and an unsigned app
@@ -82,9 +100,9 @@ not obvious:
   manual `security create-keychain` step — electron-builder imports the
   certificate itself.
 - **The Homebrew cask is a separate repository** (`cyberneura/homebrew-tap`,
-  `Casks/mullion.rb`) and its `version` and `sha256` are hand-written. Nothing
-  fails if you forget: `brew install --cask` simply keeps installing the old
-  release. The workflow prints the two lines to paste into its run summary.
+  `Casks/mullion.rb`) and it updates itself: the tap checks the latest release of
+  each project every hour and rewrites `version` and `sha256`. Nothing here
+  pushes to it, so the cask can be up to an hour behind a new release.
 - `build.artifactName` fixes the dmg's file name. The cask's `url` is built from
   it, so changing it breaks installs for every published version.
 
@@ -129,10 +147,10 @@ pnpm test     # node --test
 pnpm check    # node --check on every source file
 ```
 
-Nothing runs on push. The only workflow is the manual release, and it runs both
-of these before it builds, so `pnpm test` and `pnpm check` are still the gate —
-they are just also the last thing standing between a mistake and a signed
-artefact on the internet.
+The `test` job of the release workflow runs both on every pull request and
+before every release build, so `pnpm test` and `pnpm check` are the gate — they
+are also the last thing standing between a mistake and a signed artefact on the
+internet.
 
 The app itself cannot be launched headlessly in the agent environment, and
 macOS packaging cannot be verified on Linux — say so instead of claiming a

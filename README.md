@@ -293,11 +293,13 @@ scripts/                 macOS bundle naming for development, and the release
 pnpm release           # patch. `minor` and `major` also work
 ```
 
-It bumps the version, pushes it to `main`, starts the release workflow and
-watches it. The workflow builds a signed and notarized universal dmg and
-attaches it to a GitHub release. The Homebrew cask in
-[cyberneura/homebrew-tap](https://github.com/cyberneura/homebrew-tap) carries the
-version and checksum by hand; the workflow prints both in its run summary.
+It bumps the version, pushes it to `main` and watches the release workflow that
+push starts. A push to `main` releases the version in `package.json` when it is
+not published yet and is newer than the latest release, so merging a pull
+request that bumps the version releases it as well. The workflow builds a signed
+and notarized universal dmg and attaches it to a GitHub release. The Homebrew
+cask in [cyberneura/homebrew-tap](https://github.com/cyberneura/homebrew-tap)
+follows the latest release on its own within the hour.
 
 ## License
 

@@ -1,29 +1,163 @@
 name: Release
 
-# 手動実行 (workflow_dispatch) のみ。push では自動ビルドしない。
-# ローカルからは `pnpm release` で起動する。
+# リリースは main の package.json の version で決まる。まだリリースされておらず、
+# 公開中の最新より新しい version を main に載せればリリースされ、リリース済みの
+# version のままなら何度 push しても何も起きない。ローカルからは
+# `pnpm release [patch|minor|major]` (scripts/release.sh) で採番して push する。
+# PR の中で version を上げてマージしても同じようにリリースされる。
+#
+# 実行可否を決めるのは diff ではなく「その version がリリース済みか」。squash / rebase /
+# 直 push で diff は変わるが結果は変わらない (冪等)。path フィルターを付けないのも
+# 同じ理由で、bump が想定外の形で入っても取りこぼさないため。
 on:
+  push:
+    branches: [main]
+  # PR では test ジョブだけが走る (plan 以降は if で止めてある)。門番のテストを
+  # マージ前に同じ定義で回すためで、リリース経路とテストの内容がずれない。
+  pull_request:
+  # version は正しいのに、その時の run が (API の一時障害等で) 失敗した場合の再実行用。
+  # 同じ判定を通るので、公開済みの version をもう一度出すことはできない。
   workflow_dispatch:
 
-# GitHub Release の作成とアセットアップロードに contents: write が必要。
-permissions:
-  contents: write
+# 既定は権限なし。必要な job にだけ与える。特に test は PR が持ち込んだコードを
+# 実行するので contents: read までしか渡さない (同一リポジトリからの PR では
+# GITHUB_TOKEN が write を持ちうるため、ここを既定に任せない)。
+#
+# public リポジトリの fork からの pull_request では、permissions の記述に関わらず
+# GITHUB_TOKEN が read-only に切り下げられ secrets も渡らない。同一リポジトリの
+# ブランチから PR を出せるのは既に write 権限を持つ相手だけなので、PR で workflow を
+# 書き換えても権限の昇格にはならない。
+permissions: {}
 
-# 同時に走らないよう直列化する。1 回の dispatch が 1 つの version に対応するため、
-# キャンセルされた run の version は (bump コミットは main に載ったまま) 永久に公開
-# されない状態になる。走行中を守る cancel-in-progress: false だけでは不十分で、
-# 既定の queue: single は pending を 1 件しか保持せず、新しい dispatch が既存 pending を
-# 置き換えてしまう。queue: max は pending を 100 件まで積む。
+# 同時に走らないよう直列化する。run 単位で直列なので、後続の run の plan は先行 run の
+# publish が終わってから走り、同じ version を二重にビルドしない。ただし pending の
+# 消化順は push 順とは限らない (GitHub は開始順を保証しない)。新しい version が先に
+# 公開された後で古い version の run が回ってきても、plan が「最新より古い」で止める。
+# run を取りこぼすと、その version は次に main へ push (または dispatch) されるまで
+# 公開されない。取りこぼさないために 2 つとも要る:
+#   cancel-in-progress: false — 走行中の run を後発でキャンセルしない。
+#   queue: max — pending も最大 100 件まで積む。既定の `queue: single` は pending を
+#     1 件しか保持せず、新しい run が既存 pending を置き換える。
+# (queue: max と cancel-in-progress: true の併用は validation error になる)
+#
+# PR の検査 run はリリースの直列化とは無関係なので、リリース用のグループへ入れない
+# (同じグループにすると PR が走るだけでリリースが pending に積まれる)。commit ごとに
+# 別グループにして、同じ PR への連続 push が順番待ちを作らないようにする。
 concurrency:
-  group: ${{ github.workflow }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('{0}-{1}', github.ref, github.sha) || 'release' }}
   cancel-in-progress: false
   queue: max
 
 jobs:
+  # 署名・公証に macOS ランナーを使う前に、その version がまだリリースされておらず、
+  # 公開中の最新より新しいことを確かめる。ここが false を返す限り、main への push の
+  # たびに macOS ランナーが動くことはない。
+  # PR ではリリース判定そのものが無意味なので走らせない。この job が skipped に
+  # なると、依存している build / publish も (always() を使っていないので) skipped に
+  # なる — PR では test だけが動く。
+  plan:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.decide.outputs.release }}
+    steps:
+      # dispatch は自分の ref を指定できる。未公開 version を載せたブランチが、
+      # そのブランチの内容でリリースされてしまわないようにする (push では main 以外
+      # 起こり得ないが、dispatch では起こる)。
+      - name: Refuse to release from anywhere but main
+        if: github.ref != 'refs/heads/main'
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          echo "::error::releases come from main, and this run is on ${REF}"
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Read version
+        id: version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      # 判定の中身は scripts/release-decide.sh。publish が公開直前にも同じ判定を使う。
+      # `release=$(...)` を代入で受けるのは、スクリプトの失敗 (判定不能) で step を
+      # 落とすため (echo の引数の中でコマンド置換が失敗しても -e は効かない)。
+      - name: Decide whether this version still needs releasing
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          release=$(bash scripts/release-decide.sh)
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
+  # リリースビルドの門番。方針: cyberneura/cyberneura-github-actions の
+  # docs/build-requires-tests.md
+  #
+  # runs-on を build と同じ macOS にしてあるのは方針のルール 4 による (配布物は
+  # macOS 向けにしか作らないので、検査もその OS で行う)。
+  test:
+    # push / dispatch では、実際にリリースする version の時だけ走らせる。plan を
+    # 通さず無条件に走らせると、リリースを伴わない main への push のたびに
+    # macOS ランナーが動く — plan を置いた目的そのものが無くなる。
+    # PR では plan が skipped になり、既定ではこの job も道連れで skipped になる
+    # ので、!cancelled() で自動スキップを外してからイベント名で判定する
+    # (plan が失敗した時は needs.plan.result で止まる)。
+    needs: plan
+    if: >-
+      ${{ !cancelled()
+          && (github.event_name == 'pull_request'
+              || (needs.plan.result == 'success'
+                  && needs.plan.outputs.release == 'true')) }}
+    runs-on: macos-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      # `version` を渡さない理由は build ジョブの同じステップを参照。
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check
+        run: pnpm check && pnpm test
+
   # macOS 専用アプリなので macOS のみビルドする。Intel / Apple Silicon 両対応の
   # universal dmg を配布する (package.json の build.mac.target で指定済み)。
   build:
+    # test を通らずにビルドしない。needs は同じ run の job にしか効かないので、
+    # テストを別 workflow に切り出さないこと。
+    needs: [plan, test]
+    # PR では成果物を作らない (Apple の証明書を PR のコードに触らせないためでもある)。
+    # PR では plan が skipped なので下の判定だけでも止まるが、証明書を扱う job なので
+    # イベント名でも明示的に止める。
+    if: github.event_name != 'pull_request' && needs.plan.outputs.release == 'true'
     runs-on: macos-latest
+    # GitHub Release の作成とアセットアップロードに contents: write が必要。
+    permissions:
+      contents: write
     # universal ビルドは両アーキの Electron を落としてから結合するうえ、Apple の
     # 公証サービスの待ち時間が読めない。ハングした時の上限であって通常はここまで
     # 使わない。
@@ -55,9 +189,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Check
-        run: pnpm check && pnpm test
-
       # Secret が欠けていても electron-builder は「失敗」ではなく**黙って未署名の
       # 成果物を作る** (CSC_LINK が無ければ署名を飛ばし、公証の env が無ければ
       # 公証も行わない)。未署名・未公証の dmg は cask から入れても Gatekeeper に
@@ -83,9 +214,9 @@ jobs:
           fi
           echo "All signing and notarization secrets are present."
 
-      # 公開済みバージョンに上書きしてしまう事故を防ぐ。`pnpm release` は毎回
-      # version を上げてから dispatch するので、ここで衝突していれば bump を
-      # 経ずに手で起動されたということ。
+      # 公開済みバージョンに上書きしてしまう事故を防ぐ。plan が公開済みの version を
+      # 止めるので、ここで引っかかるのは plan の後に誰かが公開した場合と、下の
+      # タグ / draft の残骸。
       #
       # 404 だけを「存在しない」と読む。`gh release view` の非ゼロ終了をまとめて
       # 「無い」と扱うと、認証切れや rate limit を version の空きと誤認し、時間のかかる
@@ -223,27 +354,16 @@ jobs:
             exit 1
           fi
           echo "Release asset verified: ${NAME} ${LOCAL}"
-          # cask は version と sha256 を直書きしているので、リリースのたびに
-          # cyberneura/homebrew-tap を手で更新する必要がある。忘れても何も
-          # 失敗せず、`brew install --cask` が古い版を配り続けるだけなので、
-          # ここで貼り付ける形にして出しておく。
-          {
-            echo "## Update the Homebrew cask"
-            echo
-            echo 'Edit `Casks/mullion.rb` in `cyberneura/homebrew-tap`:'
-            echo
-            echo '```ruby'
-            echo "  version \"${VERSION}\""
-            echo "  sha256 \"${LOCAL}\""
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
 
   # ビルド・署名・公証・アップロードがすべて成功した時のみ draft を公開する。
   # 失敗した場合は draft のまま残る (不完全な Release は公開されない)。
   publish:
-    needs: build
+    needs: [plan, build]
+    if: needs.plan.outputs.release == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -264,6 +384,15 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           VERSION=$(node -p "require('./package.json').version")
+          # 公開直前に plan と同じ判定をやり直す。「Re-run failed jobs」は成功済みの
+          # plan を再実行せず当時の release=true を使い回すので、その間に新しい version が
+          # 公開されていると --latest で最新を巻き戻してしまう。止めた場合 draft は残る。
+          # タグを打つより前に判定する (打ってから止めるとタグだけが残る)。
+          release=$(VERSION="$VERSION" GH_REPO="$REPO" bash scripts/release-decide.sh)
+          if [ "$release" != "true" ]; then
+            echo "::error::v${VERSION} should no longer be published (see the message above); leaving the draft as it is."
+            exit 1
+          fi
           # タグは公開の前に、こちらから打つ。`--target` に任せると「タグがまだ無い」
           # ときにしか効かず、効かなかったことに気づけるのは公開した後になる
           # (`--draft=false` はその場で公開してしまうので、後段の照合は誤りを
