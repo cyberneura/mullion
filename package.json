@@ -1,6 +1,6 @@
 {
   "name": "mullion",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A frameless browser window for leaving a page playing.",
   "main": "src/main.js",
   "type": "commonjs",
@@ -12,12 +12,13 @@
     "start": "electron .",
     "postinstall": "node scripts/brand-dev-bundle.js",
     "devtools": "electron . --open-devtools",
-    "check": "node --check scripts/brand-dev-bundle.js && node --check src/main.js && node --check src/cli.js && node --check src/targets.js && node --check src/scripts.js && node --check src/settings.js && node --check src/images.js && node --check src/menubar.js && node --check src/qrcode.js && node --check src/navigation.js && node --check src/navigation-preload.js && node --check src/titlebar.js && node --check src/qr.js && node --check src/qr-preload.js && node --check bin/mullion.js",
+    "check": "node --check scripts/brand-dev-bundle.js && node --check src/main.js && node --check src/cli.js && node --check src/targets.js && node --check src/scripts.js && node --check src/settings.js && node --check src/images.js && node --check src/menubar.js && node --check src/qrcode.js && node --check src/navigation.js && node --check src/navigation-preload.js && node --check src/titlebar.js && node --check src/qr.js && node --check src/qr-preload.js && node --check src/notices.js && node --check bin/mullion.js && bash -n scripts/generate-third-party-notices.sh",
     "test": "node --test",
     "icns": "bash scripts/make-icns.sh",
     "pack": "pnpm run icns && electron-builder --dir",
     "dist": "pnpm run icns && electron-builder",
-    "release": "bash scripts/release.sh"
+    "release": "bash scripts/release.sh",
+    "notices": "bash scripts/generate-third-party-notices.sh"
   },
   "keywords": [
     "browser",
@@ -44,7 +45,9 @@
       "bin/**/*",
       "resources/tray.png",
       "resources/tray@2x.png",
-      "package.json"
+      "package.json",
+      "LICENSE",
+      "THIRD-PARTY-NOTICES.txt"
     ],
     "directories": {
       "buildResources": "resources"
@@ -53,6 +56,12 @@
     "mac": {
       "category": "public.app-category.utilities",
       "icon": "resources/icon.icns",
+      "extraResources": [
+        {
+          "from": "node_modules/electron/dist/LICENSES.chromium.html",
+          "to": "LICENSES.chromium.html"
+        }
+      ],
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "resources/entitlements.mac.plist",

@@ -46,7 +46,8 @@ const BOOLEAN_OPTIONS = {
   '--js-every-load': 'jsEveryLoad',
   '--open-devtools': 'openDevtools',
   '--help': 'help',
-  '--version': 'version'
+  '--version': 'version',
+  '--license': 'license'
 };
 
 const SHORT_OPTIONS = {
@@ -95,6 +96,7 @@ function parseCli(argv) {
     openDevtools: false,
     help: false,
     version: false,
+    license: false,
     scripts: [],
     targets: [],
     // Which value options were actually written on the command line. Defaults
@@ -226,6 +228,7 @@ Options:
   --open-devtools         open developer tools on start
   -h, --help              show this help
   -v, --version           show the version
+  --license               show the licenses of Mullion and the software it bundles
 
 Scripts run in the order they appear on the command line. Without
 --js-every-load they run once for the pages named on the command line and

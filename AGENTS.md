@@ -136,10 +136,31 @@ release, then verified) and `publish`. Points that are not obvious:
   so it is good for checking what went into the bundle and little else.
   Gatekeeper behaviour can only be judged on the notarized artefact from CI.
 
+## ライセンス表示 (THIRD-PARTY-NOTICES.txt)
+
+- `LICENSE` (MIT、Cyberneura) と `THIRD-PARTY-NOTICES.txt` はどちらも `build.files`
+  に入っていて app.asar に同梱される。表示は macOS のアプリメニュー (About の直下)、
+  他 OS の Help メニュー、menubar モードのトレイメニューの **Third-Party Licenses**
+  (テキストをそのまま `loadFile` する、preload 無しのウインドウ) と、`--license` (stdout)。
+- **依存を足す・上げる時は `pnpm notices` (`scripts/generate-third-party-notices.sh`)
+  を流し直してコミットする。** Electron を上げた時も同じ。`pnpm test` が
+  `--check` で古さを検出して落ちる。Dependabot の PR も notices を更新しないので、
+  マージ前に同じブランチで再生成する。
+- Electron は production の依存を推移的に全部 asar に入れるので、JavaScript の節は
+  `pnpm licenses list --prod` の全件を載せる (現在は 0 件)。devDependencies は入らない。
+- Bootstrap Icons はパッケージではなく SVG を直書きしているので、ライセンス本文を
+  `third-party/bootstrap-icons/LICENSE` に置いてスクリプトが読む。版を上げたら
+  `src/navigation.html` のコメントの版とこのファイルを一緒に更新する。
+- **electron-builder は macOS で Electron の `LICENSES.chromium.html` を消す**
+  (`app-builder-lib/out/electron/electronMac.js`)。notices はこのファイルを参照して
+  いるので、`build.mac.extraResources` で `node_modules/electron/dist` から
+  `Contents/Resources/` へ戻し、release.yml が成果物に在ることを確かめている。
+- 新しく依存を入れる時、GPL / LGPL / AGPL 系のライセンスなら入れる前に人間に確認する。
+
 ## Testing
 
-`src/cli.js`, `src/targets.js`, `src/scripts.js`, `src/qrcode.js`, and
-`src/images.js` have no Electron imports so they can run under `node --test`. Keep new pure logic in
+`src/cli.js`, `src/targets.js`, `src/scripts.js`, `src/qrcode.js`,
+`src/images.js`, and `src/notices.js` have no Electron imports so they can run under `node --test`. Keep new pure logic in
 those files rather than in `main.js`, and add cases to `test/`.
 
 ```shell
