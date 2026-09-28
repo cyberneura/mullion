@@ -272,6 +272,12 @@ jobs:
       # electron-builder の GitHub publisher は DMG と blockmap を並列処理し、Release が
       # 無い状態では両方が別々の draft を作る競合がある。ここでは build だけを行い、
       # 検証後に gh CLI で draft を 1 つ作って DMG だけをアップロードする。
+      # Electron 42 は postinstall が無く、node_modules/electron/dist は初回利用時にしか
+      # ダウンロードされない。mac.extraResources の LICENSES.chromium.html はそこから
+      # コピーするが、electron-builder はコピー元が無くてもログ 1 行で素通りする。
+      - name: Download the Electron binary
+        run: node node_modules/electron/install.js
+
       - name: Build, sign and notarize
         env:
           CSC_LINK: ${{ secrets.APPLE_CERTIFICATE }}
