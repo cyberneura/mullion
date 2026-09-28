@@ -14,6 +14,7 @@ const { resolveScripts, buildInjection } = require('./scripts');
 const { loadState, saveState } = require('./settings');
 const { imageTooLarge } = require('./images');
 const qrcode = require('./qrcode');
+const { noticesPath, licenseText } = require('./notices');
 
 // Heights of the two rows the navigation view can show. The view is sized to
 // their sum and the page hides the rows it was told not to draw, so the main
@@ -57,6 +58,7 @@ let mainWindow = null;
 let navigationView = null;
 let titleBarView = null;
 let qrWindow = null;
+let licensesWindow = null;
 let tray = null;
 let menubarBlurController = null;
 let quitting = false;
@@ -102,6 +104,10 @@ if (cli.help) {
 } else if (cli.version) {
   console.log(pkg.version);
   app.exit(0);
+} else if (cli.license) {
+  // Several kilobytes, and stdout is asynchronous for a pipe on macOS, so exit
+  // only once it is flushed: `mullion --license | less` would lose the tail.
+  process.stdout.write(licenseText(app.getAppPath()), () => app.exit(0));
 } else if (cli.errors.length > 0) {
   for (const error of cli.errors) console.error(`mullion: ${error}`);
   console.error('Run `mullion --help` for usage.');
@@ -333,6 +339,8 @@ function createWindow() {
     // `window-all-closed` from firing: the app would stay running with nothing
     // left but a code for a page that is gone.
     if (qrWindow && !qrWindow.isDestroyed()) qrWindow.destroy();
+    // Same for the license window.
+    if (licensesWindow && !licensesWindow.isDestroyed()) licensesWindow.destroy();
     mainWindow = null;
     menubarBlurController = null;
     navigationView = null;
@@ -1062,10 +1070,62 @@ function showContentMenu(tab) {
   ]).popup({ window: mainWindow });
 }
 
+// THIRD-PARTY-NOTICES.txt as plain text, straight out of app.asar. A text/plain
+// document has no script and no links, and the window gets no preload, so it
+// needs nothing from the main process beyond the file itself.
+function showThirdPartyLicenses() {
+  if (licensesWindow && !licensesWindow.isDestroyed()) {
+    licensesWindow.show();
+    licensesWindow.focus();
+    return;
+  }
+  licensesWindow = new BrowserWindow({
+    width: 720,
+    height: 640,
+    title: 'Third-Party Licenses',
+    autoHideMenuBar: true,
+    alwaysOnTop: cli.alwaysOnTop || cli.menubar,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  });
+  const opened = licensesWindow;
+  // The document's title would be the file name.
+  opened.on('page-title-updated', (event) => event.preventDefault());
+  opened.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  opened.webContents.on('will-navigate', (event) => event.preventDefault());
+  opened.on('closed', () => {
+    if (licensesWindow === opened) licensesWindow = null;
+  });
+  opened.loadFile(noticesPath(app.getAppPath()));
+}
+
 function buildAppMenu() {
   const isMac = process.platform === 'darwin';
   return Menu.buildFromTemplate([
-    ...(isMac ? [{ role: 'appMenu' }] : []),
+    // Spelled out rather than `{ role: 'appMenu' }` so "Third-Party Licenses"
+    // can sit right under About; the rest is what the role would have built.
+    ...(isMac
+      ? [
+          {
+            label: APP_NAME,
+            submenu: [
+              { role: 'about' },
+              { label: 'Third-Party Licenses', click: showThirdPartyLicenses },
+              { type: 'separator' },
+              { role: 'services' },
+              { type: 'separator' },
+              { role: 'hide' },
+              { role: 'hideOthers' },
+              { role: 'unhide' },
+              { type: 'separator' },
+              { role: 'quit' }
+            ]
+          }
+        ]
+      : []),
     {
       label: 'File',
       submenu: [
@@ -1120,7 +1180,9 @@ function buildAppMenu() {
         }
       ]
     },
-    { label: 'Window', submenu: [{ role: 'minimize' }, ...(isMac ? [{ role: 'zoom' }, { role: 'front' }] : [])] }
+    { label: 'Window', submenu: [{ role: 'minimize' }, ...(isMac ? [{ role: 'zoom' }, { role: 'front' }] : [])] },
+    // Off macOS there is no application menu, and no About either.
+    ...(isMac ? [] : [{ role: 'help', submenu: [{ label: 'Third-Party Licenses', click: showThirdPartyLicenses }] }])
   ]);
 }
 
@@ -1135,7 +1197,11 @@ function createTray() {
   const contextMenu = Menu.buildFromTemplate([
     { label: 'Close', click: () => { quitting = true; app.quit(); } },
     { label: 'Reload', click: () => activeTab() && activeTab().view.webContents.reload() },
-    { label: 'Restart', click: restartTargets }
+    { label: 'Restart', click: restartTargets },
+    { type: 'separator' },
+    // In menu bar mode the dock icon is hidden and so is the application menu
+    // with it, so this is the only place the licenses can be reached from.
+    { label: 'Third-Party Licenses', click: showThirdPartyLicenses }
   ]);
   contextMenu.on('menu-will-close', () => {
     if (menubarBlurController) menubarBlurController.onBlur();

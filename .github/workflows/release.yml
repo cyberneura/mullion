@@ -295,6 +295,14 @@ jobs:
             exit 1
           fi
           echo "Verifying $APP"
+          # electron-builder は macOS で Electron の LICENSES.chromium.html を消す。
+          # package.json の mac.extraResources で node_modules/electron/dist から
+          # 戻しているが、コピー元が無いと黙って省略されるので、ここで確かめる。
+          # THIRD-PARTY-NOTICES.txt はこのファイルを参照している。
+          test -s "$APP/Contents/Resources/LICENSES.chromium.html" || {
+            echo "::error::LICENSES.chromium.html is missing from the app bundle."
+            exit 1
+          }
           codesign --verify --deep --strict --verbose=2 "$APP"
           codesign --display --verbose=4 "$APP" 2>&1 | grep -q "Authority=Developer ID Application" || {
             echo "::error::The app is not signed with a Developer ID Application certificate."

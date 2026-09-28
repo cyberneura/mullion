@@ -88,6 +88,7 @@ see below.
 | `--playwright <code>` / `--playwright-file <path>` | run Playwright-compatible code after the page loads |
 | `--js-every-load` | re-run the scripts after every navigation |
 | `--open-devtools` | open developer tools on start |
+| `--license` | print the licenses of Mullion and the software it bundles, then exit |
 
 ### The title bar
 
@@ -243,6 +244,7 @@ control the tray-menu gesture themselves.
 | **Close** | quit Mullion |
 | **Reload** | reload the current URL |
 | **Restart** | go back to the pages given on the command line and re-run the scripts |
+| **Third-Party Licenses** | show the licenses of the software Mullion bundles |
 
 Closing the window (`Cmd/Ctrl+W` on the last tab) only puts it away — **Close**
 is what ends the session.
@@ -284,7 +286,9 @@ src/navigation.*         the navigation bar renderer
 src/titlebar.*           the title bar renderer
 src/qr.*                 the QR code window renderer
 src/settings.js          window bounds and preferences in userData
-scripts/                 macOS bundle naming for development, and the release
+src/notices.js           reads LICENSE / THIRD-PARTY-NOTICES.txt (unit tested)
+scripts/                 macOS bundle naming for development, the release, and the notices
+third-party/             license texts of assets vendored without a package
 ```
 
 ## Releasing
@@ -303,8 +307,33 @@ follows the latest release on its own within the hour.
 
 ## License
 
-MIT.
+MIT. See [LICENSE](LICENSE).
 
 The toolbar glyphs are [Bootstrap Icons](https://icons.getbootstrap.com/) 1.13.1
 (MIT), inlined as SVG in `src/navigation.html` rather than pulled in as a
 webfont or a dependency.
+
+## Third-party licenses
+
+[THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt) lists the open source
+software Mullion ships: Electron (whose Chromium notices are in the app bundle
+as `LICENSES.chromium.html`), the production JavaScript dependencies (there are
+none at the moment), and Bootstrap Icons. In the app it is under
+**Mullion → Third-Party Licenses** on macOS, **Help → Third-Party Licenses**
+elsewhere, and in the tray menu in menu bar mode.
+
+`--license` prints Mullion's own license followed by the same list. `open`
+does not connect the app to your terminal, so run the executable inside the
+bundle to see it:
+
+```shell
+/Applications/Mullion.app/Contents/MacOS/Mullion --license
+```
+
+The file is generated. After adding or upgrading a dependency, regenerate it and
+commit the result:
+
+```shell
+pnpm notices            # rewrite THIRD-PARTY-NOTICES.txt
+pnpm notices --check    # fail if it is out of date (pnpm test runs this)
+```
