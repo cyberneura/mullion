@@ -155,6 +155,8 @@ release, then verified) and `publish`. Points that are not obvious:
   (`app-builder-lib/out/electron/electronMac.js`)。notices はこのファイルを参照して
   いるので、`build.mac.extraResources` で `node_modules/electron/dist` から
   `Contents/Resources/` へ戻し、release.yml が成果物に在ることを確かめている。
+  Electron 42 は postinstall が無く `node_modules/electron/dist` は初回利用時まで無いので、
+  release.yml はビルド前に `node node_modules/electron/install.js` を流す。
 - 新しく依存を入れる時、GPL / LGPL / AGPL 系のライセンスなら入れる前に人間に確認する。
 
 ## Testing
