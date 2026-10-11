@@ -333,6 +333,68 @@ jobs:
           }
           xcrun stapler validate "$APP"
 
+      # electron-builder が公証するのは .app だけで、dmg は package.json の dmg.sign で
+      # 署名されるだけ。公証されていない dmg は、ダウンロードした利用者の Gatekeeper の
+      # 検査 (spctl --type open) で rejected になる。中の .app が公証済みでも dmg は別に要る。
+      # staple すると dmg の中身が変わるので、upload (と hash の照合) より前に行う。
+      # electron-builder が作る blockmap は staple 前の dmg のものになるが、Release には
+      # 上げておらず自動更新も使っていないので影響しない。
+      - name: Notarize and staple the dmg
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          DMG="dist/mullion-${VERSION}-universal.dmg"
+          if [ ! -f "$DMG" ]; then
+            echo "::error::Expected ${DMG}. Did build.artifactName change? The cask url depends on this name."
+            ls -la dist || true
+            exit 1
+          fi
+          # dmg.sign は identity が見つからないと黙って署名を飛ばす。公証に出す前に、
+          # Developer ID で署名され、公証に必須の secure timestamp が付いていることを見る。
+          SIG=$(codesign --display --verbose=4 "$DMG" 2>&1) || {
+            echo "::error::The dmg is not signed: ${SIG}"
+            exit 1
+          }
+          printf '%s\n' "$SIG" | grep -q "Authority=Developer ID Application" || {
+            echo "::error::The dmg is not signed with a Developer ID Application certificate: ${SIG}"
+            exit 1
+          }
+          printf '%s\n' "$SIG" | grep -q "^Timestamp=" || {
+            echo "::error::The dmg signature has no secure timestamp, which notarization requires: ${SIG}"
+            exit 1
+          }
+          # exit code と status の両方で判定する。submit が非 0 で終わってもステップを
+          # すぐ終わらせず、出力と公証のログ (Invalid の理由) を残してから落とす。
+          rc=0
+          result=$(xcrun notarytool submit "$DMG" \
+            --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" \
+            --wait --output-format json) || rc=$?
+          echo "$result"
+          status=$(echo "$result" | jq -r '.status // empty' 2>/dev/null || true)
+          if [ "$rc" -ne 0 ] || [ "$status" != "Accepted" ]; then
+            id=$(echo "$result" | jq -r '.id // empty' 2>/dev/null || true)
+            if [ -n "$id" ]; then
+              xcrun notarytool log "$id" \
+                --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" || true
+            fi
+            echo "::error::Notarization of the dmg failed (exit ${rc}, status '${status:-none}')."
+            exit 1
+          fi
+          xcrun stapler staple "$DMG"
+          xcrun stapler validate "$DMG"
+          ASSESS=$(spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG" 2>&1) || {
+            echo "::error::Gatekeeper rejected the dmg: ${ASSESS}"
+            exit 1
+          }
+          echo "$ASSESS"
+          printf '%s' "$ASSESS" | grep -q "source=Notarized Developer ID" || {
+            echo "::error::Accepted, but not as a notarized Developer ID dmg: ${ASSESS}"
+            exit 1
+          }
+
       # 署名を確かめたのはローカルの成果物で、利用者が受け取るのは Release の
       # アセット。その2つが同じものだと確かめるまで、検証は終わっていない。
       # `gh release upload` の成功だけでなく、同じ名前のアセットを GitHub から

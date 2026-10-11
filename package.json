@@ -1,6 +1,6 @@
 {
   "name": "mullion",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "A frameless browser window for leaving a page playing.",
   "main": "src/main.js",
   "type": "commonjs",
@@ -73,6 +73,9 @@
           "arch": "universal"
         }
       ]
+    },
+    "dmg": {
+      "sign": true
     },
     "win": {
       "target": [
