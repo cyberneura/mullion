@@ -86,6 +86,13 @@ release, then verified) and `publish`. Points that are not obvious:
   installed from a cask is quarantined and refused by Gatekeeper. The workflow
   checks the secrets before building and inspects the artefact after
   (`codesign`, `spctl`, `stapler validate`) rather than trusting a green build.
+- **The dmg is notarized by the workflow, not by electron-builder.**
+  electron-builder notarizes only the `.app`; `dmg.sign: true` in `package.json`
+  makes it sign the dmg, and nothing more. An unnotarized dmg is rejected by
+  `spctl -a -t open --context context:primary-signature` once downloaded, even
+  though the app inside is notarized. The `Notarize and staple the dmg` step
+  submits it with `notarytool`, staples it and checks it with `spctl` before the
+  upload, so the uploaded file (and its hash) is the stapled one.
 - **electron-builder never publishes the Release.** `--publish never` is
   intentional: its DMG and blockmap publishers run independently, and when no
   Release exists they can race into two drafts with the same tag. The workflow
