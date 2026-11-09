@@ -2,6 +2,8 @@
 
 A frameless browser window for leaving a page playing.
 
+Website: https://www.cyberneura.com/app/mullion
+
 Mullion opens a URL or a local file in a window with no visible browser UI —
 just the page. The navigation bar appears when you ask for it and gets out of
 the way again. It can run a script after the page loads, and it can live in the
