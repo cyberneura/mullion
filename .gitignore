@@ -7,3 +7,6 @@ out/
 .DS_Store
 .claude/settings.local.json
 .claude/.cc-writes/
+
+# Native icon outputs are versioned with their inputs.
+!resources/icon.icns

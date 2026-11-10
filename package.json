@@ -60,6 +60,10 @@
         {
           "from": "node_modules/electron/dist/LICENSES.chromium.html",
           "to": "LICENSES.chromium.html"
+        },
+        {
+          "from": "resources/Assets.car",
+          "to": "Assets.car"
         }
       ],
       "hardenedRuntime": true,
@@ -72,7 +76,10 @@
           "target": "dmg",
           "arch": "universal"
         }
-      ]
+      ],
+      "extendInfo": {
+        "CFBundleIconName": "Mullion"
+      }
     },
     "dmg": {
       "sign": true
