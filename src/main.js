@@ -145,7 +145,7 @@ function start() {
     cliTargets = collectStartupUrls();
 
     if (process.platform === 'darwin' && !app.isPackaged && app.dock) {
-      const icon = nativeImage.createFromPath(path.join(__dirname, '..', 'resources', 'icon.png'));
+      const icon = nativeImage.createFromPath(path.join(__dirname, '..', 'resources', 'app-icons', 'AppIcon.iconset', 'icon_512x512@2x.png'));
       if (!icon.isEmpty()) app.dock.setIcon(icon);
     }
 

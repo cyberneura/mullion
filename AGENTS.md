@@ -117,27 +117,18 @@ release, then verified) and `publish`. Points that are not obvious:
 
 - **`build.files` lists the runtime assets one by one, and `resources/` is not
   a glob.** Only `tray.png` and `tray@2x.png` go in, because they are the only
-  files the app reads at run time; `icon.png` is a build input and the dev-only
-  dock icon. An asset that a packaged build needs and that is not listed here
+  files the app reads at run time; `icon.png` remains the Windows/Linux build input. The dev-only macOS
+  Dock image is `resources/app-icons/AppIcon.iconset/icon_512x512@2x.png`. An asset that a packaged build needs and that is not listed here
   does not fail loudly — `nativeImage.createFromPath()` returns an empty image
   and the tray icon is simply invisible. Check with
   `npx asar list dist/mac-*/Mullion.app/Contents/Resources/app.asar`.
 - **`pnpm pack` is not `pnpm run pack`.** pnpm has a built-in `pack` that wins
   over the script of the same name, so `pnpm pack` writes an npm tarball and
   never runs electron-builder. Use `pnpm run pack`.
-- **The `.icns` is built by `iconutil`, not by electron-builder.** Given only a
-  PNG, electron-builder writes its own icns, and its small representations
-  (16pt and 32pt) come out as colour noise: the Finder list view and the small
-  icon in Get Info show static instead of the icon. The large representations
-  are plain PNG inside the container, so the Dock and icon view look right and
-  nothing in the build complains. The old icns types carry raw pixels rather
-  than a PNG — `is32` and `il32` want their RGB run-length encoded, PackBits
-  style — so `scripts/make-icns.sh` hands the whole job to Apple's `sips` +
-  `iconutil` rather than keeping an encoder here.
-  `pack` and `dist` run it first, and `mac.icon` points at the generated
-  `resources/icon.icns` (git-ignored; `resources/icon.png` stays the source and
-  the dev-only dock icon). The script is macOS-only and refuses to run
-  elsewhere — packaging is macOS-only anyway.
+- `scripts/make-icns.sh` invokes the native size-specific generator. `mac.icon`
+  points at `resources/icon.icns`; `mac.extraResources` installs Assets.car and
+  `mac.extendInfo` names its catalog. Generation uses the fixed original in
+  `resources/app-icons/`; development uses its padded 1024px PNG directly.
 - A local build is unsigned unless the machine has the Developer ID certificate
   (`CSC_IDENTITY_AUTO_DISCOVERY=false` skips signing cleanly instead of failing),
   so it is good for checking what went into the bundle and little else.
@@ -260,3 +251,13 @@ run happened.
   Conformance rests on `test/fixtures/qrcode-vectors.json`: whole matrices from
   an unrelated implementation, compared module for module. Touching the encoder
   means adding a fixture, not another round trip.
+
+## macOS app icon
+
+Run `bash scripts/generate-macos-icons.sh` with Xcode on macOS. Fixed artwork,
+layout measurements, size-specific sources and the verification command are in
+`resources/app-icons/README.md`. Small @1x backgrounds reach the canvas edges;
+the glyph fits inside the central 80%. Larger backgrounds have 10% outer margins.
+Do not replace the generated ICNS with `tauri icon` / `iconutil`: preserve the
+ARGB small entries and the matching Assets.car / CFBundleIconName registration.
+Native rendering is verified by `.github/workflows/macos-icons.yml`.
