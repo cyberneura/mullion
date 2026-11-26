@@ -134,28 +134,33 @@ release, then verified) and `publish`. Points that are not obvious:
   so it is good for checking what went into the bundle and little else.
   Gatekeeper behaviour can only be judged on the notarized artefact from CI.
 
-## ライセンス表示 (THIRD-PARTY-NOTICES.txt)
+## License notices (THIRD-PARTY-NOTICES.txt)
 
-- `LICENSE` (MIT、Cyberneura) と `THIRD-PARTY-NOTICES.txt` はどちらも `build.files`
-  に入っていて app.asar に同梱される。表示は macOS のアプリメニュー (About の直下)、
-  他 OS の Help メニュー、menubar モードのトレイメニューの **Third-Party Licenses**
-  (テキストをそのまま `loadFile` する、preload 無しのウインドウ) と、`--license` (stdout)。
-- **依存を足す・上げる時は `pnpm notices` (`scripts/generate-third-party-notices.sh`)
-  を流し直してコミットする。** Electron を上げた時も同じ。`pnpm test` が
-  `--check` で古さを検出して落ちる。Dependabot の PR も notices を更新しないので、
-  マージ前に同じブランチで再生成する。
-- Electron は production の依存を推移的に全部 asar に入れるので、JavaScript の節は
-  `pnpm licenses list --prod` の全件を載せる (現在は 0 件)。devDependencies は入らない。
-- Bootstrap Icons はパッケージではなく SVG を直書きしているので、ライセンス本文を
-  `third-party/bootstrap-icons/LICENSE` に置いてスクリプトが読む。版を上げたら
-  `src/navigation.html` のコメントの版とこのファイルを一緒に更新する。
-- **electron-builder は macOS で Electron の `LICENSES.chromium.html` を消す**
-  (`app-builder-lib/out/electron/electronMac.js`)。notices はこのファイルを参照して
-  いるので、`build.mac.extraResources` で `node_modules/electron/dist` から
-  `Contents/Resources/` へ戻し、release.yml が成果物に在ることを確かめている。
-  Electron 42 は postinstall が無く `node_modules/electron/dist` は初回利用時まで無いので、
-  release.yml はビルド前に `node node_modules/electron/install.js` を流す。
-- 新しく依存を入れる時、GPL / LGPL / AGPL 系のライセンスなら入れる前に人間に確認する。
+- `LICENSE` (MIT, Cyberneura) and `THIRD-PARTY-NOTICES.txt` are both in `build.files`
+  and are bundled into app.asar. They are shown via **Third-Party Licenses** in the
+  macOS app menu (right below About), the Help menu on other OSes, and the tray menu
+  in menubar mode (a window without a preload that `loadFile`s the text as-is), and
+  via `--license` (stdout).
+- **When adding or upgrading a dependency, rerun `pnpm notices`
+  (`scripts/generate-third-party-notices.sh`) and commit the result.** The same applies
+  when upgrading Electron. `pnpm test` detects stale output with `--check` and fails.
+  Dependabot PRs do not update the notices either, so regenerate them on the same
+  branch before merging.
+- Electron puts all production dependencies, transitively, into the asar, so the
+  JavaScript section lists every entry from `pnpm licenses list --prod` (currently 0).
+  devDependencies are not included.
+- Bootstrap Icons are not a package; the SVGs are written inline, so the license text
+  is placed in `third-party/bootstrap-icons/LICENSE` and the script reads it. When
+  upgrading the version, update the version in the comment in `src/navigation.html`
+  and this file together.
+- **electron-builder deletes Electron's `LICENSES.chromium.html` on macOS**
+  (`app-builder-lib/out/electron/electronMac.js`). The notices refer to this file, so
+  `build.mac.extraResources` copies it back from `node_modules/electron/dist` into
+  `Contents/Resources/`, and release.yml checks that it is present in the artifact.
+  Electron 42 has no postinstall and `node_modules/electron/dist` does not exist until
+  first use, so release.yml runs `node node_modules/electron/install.js` before building.
+- When adding a new dependency under a GPL / LGPL / AGPL-family license, check with a
+  human before adding it.
 
 ## Testing
 
