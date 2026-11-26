@@ -1,36 +1,36 @@
 ---
 name: release
-description: "Bump the minor version, release, and update the Homebrew cask"
+description: "マイナーバージョンを上げてリリースし、Homebrew cask まで更新する"
 allowed-tools: Bash(git:*), Bash(gh:*), Bash(pnpm:*), Bash(shasum:*), Bash(node:*), Bash(curl:*)
 ---
 
 # Task
 
-Release Mullion. Do everything end to end, from the version bump to updating the Homebrew cask.
+Mullion をリリースする。バージョンの bump から Homebrew cask の更新までを通しで行う。
 
-If the argument (`$ARGUMENTS`) specifies `patch` / `minor` / `major`, use it;
-**if nothing is specified, use `minor`**. Below, `<BUMP>` refers to that value, and `<VERSION>` to the
-version after the bump (e.g. `0.2.0`).
+引数 (`$ARGUMENTS`) に `patch` / `minor` / `major` が指定されていればそれを使い、
+**指定が無ければ `minor`** を使う。以下 `<BUMP>` はその値、`<VERSION>` は bump 後の
+バージョン (例 `0.2.0`) を指す。
 
-The background is in the "Releasing" section of `CLAUDE.md`. Read it first if you are
-changing the release mechanism itself.
+背景は `CLAUDE.md` の「Releasing」節に書いてある。リリース機構そのものを直す時は
+先にそれを読むこと。
 
 ---
 
-## Step 1: Check the preconditions
+## Step 1: 前提の確認
 
 ```shell
-git branch --show-current   # must be main
-git status --porcelain      # must be empty
+git branch --show-current   # main であること
+git status --porcelain      # 空であること
 git fetch origin +main:refs/remotes/origin/main
-git rev-parse HEAD origin/main   # must match
+git rev-parse HEAD origin/main   # 一致すること
 gh auth status
 ```
 
-If any of these is not satisfied, **do nothing, report to the user, and stop**.
-`scripts/release.sh` runs the same checks, but failing here first makes it easier to explain the situation.
+どれかが満たされていなければ、**何もせずユーザーに報告して止まる**。
+`scripts/release.sh` も同じ検査をするが、ここで先に落としておくほうが状況を説明しやすい。
 
-Then run the gates locally (they also run in the workflow, but this fails fast without waiting for CI):
+続けてローカルでゲートを通す (workflow でも走るが、CI を待たずに落とせる):
 
 ```shell
 pnpm check && pnpm test
@@ -38,52 +38,52 @@ pnpm check && pnpm test
 
 ---
 
-## Step 2: Bump and start the build
+## Step 2: bump してビルドを起動する
 
 ```shell
 pnpm release <BUMP>
 ```
 
-This single command does everything: assigns the version → commits `chore: release v<VERSION>` → pushes
-to main → dispatches `release.yml` → watches it until completion. Do not run
-`npm version` or `git tag` yourself. The workflow creates the tag right before publishing.
+これ 1 コマンドで、version の採番 → `chore: release v<VERSION>` の commit → main への
+push → `release.yml` の dispatch → 完了まで watch、までが行われる。自分で
+`npm version` や `git tag` を打たないこと。タグは workflow が公開直前に打つ。
 
-**It takes 15–30 minutes because of signing and notarization**. That exceeds the Bash tool's limit (10 minutes), so
-launch it with `run_in_background: true` and wait for the completion notification. To check progress along the way:
+**実行時間は署名と公証で 15〜30 分かかる**。Bash ツールの上限 (10 分) を超えるので、
+`run_in_background: true` で投げ、完了通知を待つ。途中経過を見たい時は:
 
 ```shell
 gh run list --workflow=release.yml --limit 3
 ```
 
-If it fails, `scripts/release.sh` writes in its output that "the bump commit is still on main".
-Pass that message on to the user as-is, and do not revert main on your own or
-delete tags or draft releases (what to delete next is the user's decision).
+失敗した時は、`scripts/release.sh` が「bump commit は main に載ったまま」の状態を
+出力に書いている。そのメッセージをそのままユーザーに伝え、勝手に main を書き戻したり
+タグや draft release を消したりしないこと (次に何を消すかはユーザーの判断)。
 
-On success it prints `https://github.com/cyberneura/mullion/releases/tag/v<VERSION>`.
+成功すると `https://github.com/cyberneura/mullion/releases/tag/v<VERSION>` が出る。
 
 ---
 
-## Step 3: Verify the release
+## Step 3: リリースを検証する
 
-Confirm that it was published and that exactly one asset is attached:
+公開されたことと、アセットが 1 つだけ載っていることを確認する:
 
 ```shell
 gh release view "v<VERSION>" --json isDraft,tagName,assets,url
 ```
 
-`isDraft` must be `false`, and the assets must be exactly one `mullion-<VERSION>-universal.dmg`.
-If it is still a draft, the publish job failed. In that case, do not proceed to Step 4; report instead.
+`isDraft` が `false`、アセットが `mullion-<VERSION>-universal.dmg` 1 件であること。
+draft のまま残っていれば publish job が落ちている。その場合は Step 4 に進まず報告する。
 
 ---
 
-## Step 4: Update the Homebrew cask
+## Step 4: Homebrew cask を更新する
 
-The cask lives in a separate repository (`cyberneura/homebrew-tap`, locally
-`~/workspace/homebrew-tap`), and `version` and `sha256` are written by hand. If you forget, nothing
-fails; `brew install --cask` just keeps serving the old version, so always do this step.
+cask は別リポジトリ (`cyberneura/homebrew-tap`, ローカルは
+`~/workspace/homebrew-tap`) にあり、`version` と `sha256` は手書き。忘れても何も
+失敗せず `brew install --cask` が古い版を配り続けるだけなので、必ずここまでやる。
 
-Compute the sha256 by **actually downloading the published asset** (it also appears in the workflow
-run summary, but taking it from the exact file users receive is more reliable):
+sha256 は **公開されたアセットを実際に落として計算する** (workflow の run summary にも
+出るが、利用者が受け取るファイルそのものから取るほうが確実):
 
 ```shell
 gh release download "v<VERSION>" --repo cyberneura/mullion \
@@ -91,17 +91,17 @@ gh release download "v<VERSION>" --repo cyberneura/mullion \
 shasum -a 256 "$TMPDIR/mullion-release/mullion-<VERSION>-universal.dmg"
 ```
 
-After bringing main up to date in `~/workspace/homebrew-tap`, rewrite **only** the 2 lines
-`version` and `sha256` in `Casks/mullion.rb` (do not touch `url`, since it embeds `version`.
-If the file name pattern has changed, that means `build.artifactName` changed;
-do not rewrite anything and report to the user).
+`~/workspace/homebrew-tap` で main を最新にしてから、`Casks/mullion.rb` の
+`version` と `sha256` の 2 行**だけ**を書き換える (`url` は `version` を埋め込んでいる
+ので触らない。ファイル名の形が変わっていたら `build.artifactName` が変わったという
+ことなので、書き換えずにユーザーに報告する)。
 
 ```shell
 git -C ~/workspace/homebrew-tap fetch origin && git -C ~/workspace/homebrew-tap pull --ff-only
 ```
 
-After rewriting, confirm the diff is 2 lines, then commit directly to main and push
-(no PR needed):
+書き換えたら差分が 2 行であることを確認し、直接 main にコミットして push する
+(PR は不要):
 
 ```shell
 git -C ~/workspace/homebrew-tap diff
@@ -111,16 +111,16 @@ git -C ~/workspace/homebrew-tap push origin main
 
 ---
 
-## Step 5: Report
+## Step 5: 報告
 
-Tell the user:
+ユーザーに以下を伝える:
 
-- The published version and the Release URL
-- The sha256 of the dmg
-- The commit that updated the cask
+- 公開した version と Release の URL
+- dmg の sha256
+- cask を更新した commit
 
-Only if asked to confirm the installation too, suggest the following (do not run it on your own, since
-it replaces the version already installed):
+インストールの確認まで頼まれた場合のみ、以下を案内する (勝手に実行しない。既に
+入っている版が置き換わるため):
 
 ```shell
 brew update && brew upgrade --cask mullion
